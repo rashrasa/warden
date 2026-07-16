@@ -3,7 +3,7 @@ use std::{convert::Infallible, net::SocketAddr};
 use anyhow::Context;
 use http_body_util::{BodyExt, Full};
 use hyper::{
-    Request, Response, Uri,
+    Request, Response, StatusCode, Uri,
     body::{Bytes, Incoming},
     server::conn::http1,
     service::service_fn,
@@ -14,6 +14,9 @@ use tokio::{
     net::{TcpListener, TcpStream},
     select,
 };
+
+const USER_HEADER: &str = "x-warden-user";
+const AUTHORIZED_USERS: [&str; 2] = ["user1", "user2"];
 
 pub struct Warden {
     host: SocketAddr,
@@ -46,14 +49,27 @@ impl Warden {
     async fn serve_request(
         request: hyper::Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
+        match request.headers().get(USER_HEADER) {
+            None => return Ok(r_401()),
+            Some(user) => {
+                if let Ok(user_str) = String::from_utf8(user.as_bytes().to_vec()) {
+                    if !AUTHORIZED_USERS.contains(&user_str.as_str()) {
+                        return Ok(r_401());
+                    }
+                } else {
+                    return Ok(r_401());
+                }
+            }
+        }
+
         let mut path = request.uri().path();
         if let Some(p) = path.strip_suffix("/") {
             path = p;
         }
-
         match path {
             "" => Warden::hello(request).await,
             "/favicon.ico" => Ok(binary_response(
+                StatusCode::OK,
                 include_bytes!("../assets/favicon.ico"),
                 "image/x-icon",
             )),
@@ -63,7 +79,7 @@ impl Warden {
             "/placeholder" => {
                 Warden::forward(Uri::from_static("http://placehold.co/400"), request).await
             }
-            _ => Ok(html_response(include_bytes!("../assets/404.html"))),
+            _ => Ok(r_404()),
         }
     }
 
@@ -158,13 +174,25 @@ impl Warden {
     }
 }
 
-fn binary_response(bytes: &[u8], mime_type: &str) -> Response<Full<Bytes>> {
+fn binary_response(status: StatusCode, bytes: &[u8], mime_type: &str) -> Response<Full<Bytes>> {
     Response::builder()
+        .status(status)
         .header(hyper::header::CONTENT_TYPE, mime_type)
         .body(Full::from(Bytes::from(bytes.to_vec())))
         .unwrap()
 }
 
-fn html_response(bytes: &[u8]) -> Response<Full<Bytes>> {
-    binary_response(bytes, "text/html")
+fn html_response(status: StatusCode, bytes: &[u8]) -> Response<Full<Bytes>> {
+    binary_response(status, bytes, "text/html")
+}
+
+fn r_401() -> Response<Full<Bytes>> {
+    html_response(
+        StatusCode::UNAUTHORIZED,
+        include_bytes!("../assets/401.html"),
+    )
+}
+
+fn r_404() -> Response<Full<Bytes>> {
+    html_response(StatusCode::NOT_FOUND, include_bytes!("../assets/404.html"))
 }
