@@ -46,18 +46,24 @@ impl Warden {
     async fn serve_request(
         request: hyper::Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
-        match request.uri().path() {
-            "/" => Warden::hello(request).await,
+        let mut path = request.uri().path();
+        if let Some(p) = path.strip_suffix("/") {
+            path = p;
+        }
+
+        match path {
+            "" => Warden::hello(request).await,
+            "/favicon.ico" => Ok(binary_response(
+                include_bytes!("../assets/favicon.ico"),
+                "image/x-icon",
+            )),
             "/generate_204" => {
                 Warden::forward(Uri::from_static("http://google.ca/generate_204"), request).await
             }
             "/placeholder" => {
                 Warden::forward(Uri::from_static("http://placehold.co/400"), request).await
             }
-            _ => Ok(Response::builder()
-                .header("Content-Type", "text/html")
-                .body(Full::from(Bytes::from(include_str!("../assets/404.html"))))
-                .unwrap()),
+            _ => Ok(html_response(include_bytes!("../assets/404.html"))),
         }
     }
 
@@ -150,4 +156,15 @@ impl Warden {
             }
         });
     }
+}
+
+fn binary_response(bytes: &[u8], mime_type: &str) -> Response<Full<Bytes>> {
+    Response::builder()
+        .header(hyper::header::CONTENT_TYPE, mime_type)
+        .body(Full::from(Bytes::from(bytes.to_vec())))
+        .unwrap()
+}
+
+fn html_response(bytes: &[u8]) -> Response<Full<Bytes>> {
+    binary_response(bytes, "text/html")
 }
