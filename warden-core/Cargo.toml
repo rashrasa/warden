@@ -1,0 +1,18 @@
+[package]
+name = "warden-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.103"
+http-body-util = "0.1.4"
+hyper = { version = "1.10.1", features = [
+    "server",
+    "client",
+    "http1",
+    "http2",
+] }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+log = "0.4.33"
+tokio = { version = "1.52.4", features = ["signal", "net", "macros", "rt"] }
+tower = "0.5.3"
