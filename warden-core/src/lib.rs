@@ -46,26 +46,37 @@ impl Warden {
         Ok(())
     }
 
-    async fn serve_request(
-        request: hyper::Request<hyper::body::Incoming>,
-    ) -> Result<Response<Full<Bytes>>, Infallible> {
+    fn verify_request(
+        request: &hyper::Request<hyper::body::Incoming>,
+    ) -> Result<(), Response<Full<Bytes>>> {
+        let path = path(request);
+        match path {
+            "/favicon.ico" => return Ok(()),
+            _ => {}
+        }
         match request.headers().get(USER_HEADER) {
-            None => return Ok(r_401()),
+            None => return Err(r_401()),
             Some(user) => {
                 if let Ok(user_str) = String::from_utf8(user.as_bytes().to_vec()) {
                     if !AUTHORIZED_USERS.contains(&user_str.as_str()) {
-                        return Ok(r_401());
+                        return Err(r_401());
                     }
                 } else {
-                    return Ok(r_401());
+                    return Err(r_401());
                 }
             }
         }
+        return Ok(());
+    }
 
-        let mut path = request.uri().path();
-        if let Some(p) = path.strip_suffix("/") {
-            path = p;
+    async fn serve_request(
+        request: hyper::Request<hyper::body::Incoming>,
+    ) -> Result<Response<Full<Bytes>>, Infallible> {
+        if let Err(response) = Self::verify_request(&request) {
+            return Ok(response);
         }
+
+        let path = path(&request);
         match path {
             "" => Warden::hello(request).await,
             "/favicon.ico" => Ok(binary_response(
@@ -195,4 +206,13 @@ fn r_401() -> Response<Full<Bytes>> {
 
 fn r_404() -> Response<Full<Bytes>> {
     html_response(StatusCode::NOT_FOUND, include_bytes!("../assets/404.html"))
+}
+
+fn path<T>(request: &Request<T>) -> &str {
+    let mut path = request.uri().path();
+    if let Some(p) = path.strip_suffix("/") {
+        path = p;
+    }
+
+    path
 }
