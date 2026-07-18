@@ -3,7 +3,9 @@ use std::{
     time::Duration,
 };
 
-use crossterm::event::{Event, KeyCode, poll};
+use crossterm::event::{Event, KeyCode};
+use futures::{FutureExt, StreamExt};
+use tokio::{select, time::Instant};
 use warden_core::Warden;
 use warden_server_tui::pages::home::{HomePage, HomePageState, Host, Ssl, Status};
 
@@ -12,6 +14,7 @@ const HOST: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let mut stream = crossterm::event::EventStream::new();
     let mut gateway = Warden::bind(HOST).await?;
 
     let mut state = HomePageState {
@@ -21,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
         },
         status: Status::Healthy,
         lifetime_connections: 0,
+        uptime: Duration::ZERO,
     };
     let (tx, mut rx) = tokio::sync::watch::channel::<usize>(0);
     tokio::spawn(async move {
@@ -30,23 +34,34 @@ async fn main() -> anyhow::Result<()> {
             let _ = tx.send(gateway.lifetime_connections());
         }
     });
+    let start = Instant::now();
+    let mut interval = tokio::time::interval(Duration::from_millis(1000));
 
     let mut terminal = ratatui::init();
+
     let res = loop {
         terminal.draw(|frame| frame.render_stateful_widget(HomePage, frame.area(), &mut state))?;
-        if let Ok(true) = poll(Duration::from_millis(100)) {
-            match crossterm::event::read()? {
-                Event::Key(k) => match k.code {
-                    KeyCode::Char(QUIT_CHAR) => {
-                        break Ok(());
-                    }
+        select! {
+            event_result = stream.next().fuse() => {
+                if let Some(e) = event_result {
+                    match e? {
+                        Event::Key(k) => match k.code {
+                            KeyCode::Char(QUIT_CHAR) => {
+                                break Ok(());
+                            }
+                            _ => {}
+                        },
                     _ => {}
-                },
-                _ => {}
+                    }
+                }
+            }
+            update = rx.wait_for(|v| *v != state.lifetime_connections) => {
+                state.lifetime_connections = *update.unwrap();
+            }
+            _ = interval.tick() => {
+                state.uptime = start.elapsed();
             }
         }
-
-        state.lifetime_connections = *rx.borrow_and_update();
     };
 
     ratatui::restore();

@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use ratatui::{
     layout::Offset,
@@ -26,6 +26,7 @@ pub struct HomePageState {
     pub host: Host,
     pub status: Status,
     pub lifetime_connections: usize,
+    pub uptime: Duration,
 }
 
 pub struct HomePage;
@@ -51,7 +52,7 @@ impl StatefulWidget for HomePage {
                 Status::Healthy => "Healthy".into(),
                 Status::Unhealthy => "Unhealthy".into(),
             },
-            label_style: Style::default().gray(),
+            label_style: Style::default().yellow(),
             value_style: Style::default().gray(),
         };
         status.render(area.offset(Offset { x: 1, y: 1 }), buf);
@@ -60,7 +61,7 @@ impl StatefulWidget for HomePage {
             label: "Host".into(),
             value: state.host.host.to_string(),
 
-            label_style: Style::default().gray(),
+            label_style: Style::default().yellow(),
             value_style: Style::default().gray(),
         };
         host.render(area.offset(Offset { x: 1, y: 2 }), buf);
@@ -71,7 +72,7 @@ impl StatefulWidget for HomePage {
                 Ssl::Disabled => "Disabled".into(),
             },
 
-            label_style: Style::default().gray(),
+            label_style: Style::default().yellow(),
             value_style: Style::default().gray(),
         };
 
@@ -81,9 +82,18 @@ impl StatefulWidget for HomePage {
             label: "Lifetime Connections".into(),
             value: format!("{}", state.lifetime_connections),
 
-            label_style: Style::default().gray(),
-            value_style: Style::default().green(),
+            label_style: Style::default().yellow(),
+            value_style: Style::default().gray(),
         };
         connections.render(area.offset(Offset { x: 1, y: 4 }), buf);
+
+        let mut uptime = StyledLabelledText {
+            label: "Uptime".into(),
+            value: format!("{}s", state.uptime.as_secs()),
+
+            label_style: Style::default().yellow(),
+            value_style: Style::default().gray(),
+        };
+        uptime.render(area.offset(Offset { x: 1, y: 5 }), buf);
     }
 }
