@@ -6,6 +6,7 @@ use ratatui::{
     text::Line,
     widgets::{Block, Borders, StatefulWidget, Widget},
 };
+use warden_core::ConnectionInfo;
 
 use crate::components::text::StyledLabelledText;
 
@@ -26,8 +27,8 @@ pub struct Host {
 pub struct HomePageState {
     pub host: Host,
     pub status: Status,
-    pub lifetime_connections: usize,
     pub uptime: Duration,
+    pub active_connections: Vec<ConnectionInfo>,
 }
 
 pub struct HomePage;
@@ -55,6 +56,7 @@ impl StatefulWidget for HomePage {
             }),
             buf,
         );
+        let mut y = 1;
 
         let mut status = StyledLabelledText {
             label: "Status".into(),
@@ -65,7 +67,8 @@ impl StatefulWidget for HomePage {
             label_style: Style::default().yellow(),
             value_style: Style::default().gray(),
         };
-        status.render(area.offset(Offset { x: 1, y: 1 }), buf);
+        status.render(area.offset(Offset { x: 1, y }), buf);
+        y += 1;
 
         let mut host = StyledLabelledText {
             label: "Host".into(),
@@ -74,7 +77,8 @@ impl StatefulWidget for HomePage {
             label_style: Style::default().yellow(),
             value_style: Style::default().gray(),
         };
-        host.render(area.offset(Offset { x: 1, y: 2 }), buf);
+        host.render(area.offset(Offset { x: 1, y }), buf);
+        y += 1;
 
         let mut ssl = StyledLabelledText {
             label: "SSL Mode".into(),
@@ -85,17 +89,8 @@ impl StatefulWidget for HomePage {
             label_style: Style::default().yellow(),
             value_style: Style::default().gray(),
         };
-
-        ssl.render(area.offset(Offset { x: 1, y: 3 }), buf);
-
-        let mut connections = StyledLabelledText {
-            label: "Lifetime Connections".into(),
-            value: format!("{}", state.lifetime_connections),
-
-            label_style: Style::default().yellow(),
-            value_style: Style::default().gray(),
-        };
-        connections.render(area.offset(Offset { x: 1, y: 4 }), buf);
+        ssl.render(area.offset(Offset { x: 1, y }), buf);
+        y += 1;
 
         let mut uptime = StyledLabelledText {
             label: "Uptime".into(),
@@ -104,6 +99,23 @@ impl StatefulWidget for HomePage {
             label_style: Style::default().yellow(),
             value_style: Style::default().gray(),
         };
-        uptime.render(area.offset(Offset { x: 1, y: 5 }), buf);
+        uptime.render(area.offset(Offset { x: 1, y }), buf);
+        y += 2;
+
+        for conn in &state.active_connections {
+            let mut connections = StyledLabelledText {
+                label: format!("{}", conn.host),
+                value: if let Some(ua) = &conn.user_agent {
+                    format!("{}", ua)
+                } else {
+                    "No additional info".into()
+                },
+
+                label_style: Style::default().yellow(),
+                value_style: Style::default().gray(),
+            };
+            connections.render(area.offset(Offset { x: 1, y }), buf);
+            y += 1;
+        }
     }
 }

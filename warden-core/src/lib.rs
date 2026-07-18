@@ -22,6 +22,12 @@ pub struct Warden {
     inner: WardenInnerState,
 }
 
+#[derive(Debug, Clone)]
+pub struct ConnectionInfo {
+    pub host: SocketAddr,
+    pub user_agent: Option<String>,
+}
+
 // Tasks:
 //   - Accept connections and spawn handler
 //   - Perform health checks
@@ -29,7 +35,7 @@ pub struct Warden {
 struct WardenInnerState {
     host: SocketAddr,
     listener: TcpListener,
-    lifetime_connections: usize,
+    connections: Vec<ConnectionInfo>,
 }
 
 impl Warden {
@@ -37,11 +43,12 @@ impl Warden {
         let listener = TcpListener::bind(host).await?;
 
         info!("server started @ {}", host);
+
         Ok(Self {
             inner: WardenInnerState {
                 host,
                 listener,
-                lifetime_connections: 0,
+                connections: vec![],
             },
         })
     }
@@ -63,7 +70,7 @@ impl Warden {
 
     pub fn is_healthy(&self) -> bool {
         // TODO: implement health check for gateway
-        true
+        false
     }
 
     /// This drives the gateway until receiving a termination signal in the shell
@@ -205,16 +212,12 @@ impl Warden {
     ) -> anyhow::Result<()> {
         let (stream, addr) = conn.with_context(|| "failed to open connection")?;
         trace!("new connection: {}", addr);
-        self.spawn_connection_handler(stream).await;
-        self.inner.lifetime_connections += 1;
-
-        Ok(())
-    }
-
-    async fn spawn_connection_handler(&mut self, stream: TcpStream) {
+        self.inner.connections.push(ConnectionInfo {
+            host: addr,
+            user_agent: None,
+        });
         tokio::spawn(async move {
             let io = TokioIo::new(stream);
-
             if let Err(e) = http1::Builder::new()
                 .serve_connection(io, service_fn(Warden::serve_request))
                 .await
@@ -225,10 +228,12 @@ impl Warden {
                 );
             }
         });
+
+        Ok(())
     }
 
-    pub fn lifetime_connections(&self) -> usize {
-        self.inner.lifetime_connections
+    pub fn connections(&self) -> &[ConnectionInfo] {
+        &self.inner.connections
     }
 }
 

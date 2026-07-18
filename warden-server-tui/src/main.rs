@@ -23,17 +23,10 @@ async fn main() -> anyhow::Result<()> {
             ssl: Ssl::Disabled,
         },
         status: Status::Healthy,
-        lifetime_connections: 0,
         uptime: Duration::ZERO,
+        active_connections: vec![],
     };
-    let (tx, mut rx) = tokio::sync::watch::channel::<usize>(0);
-    tokio::spawn(async move {
-        let tx = tx;
-        loop {
-            gateway.serve_next().await.unwrap();
-            let _ = tx.send(gateway.lifetime_connections());
-        }
-    });
+
     let start = Instant::now();
     let mut interval = tokio::time::interval(Duration::from_millis(1000));
 
@@ -55,11 +48,14 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            update = rx.wait_for(|v| *v != state.lifetime_connections) => {
-                state.lifetime_connections = *update.unwrap();
+            res = gateway.serve_next() => {
+                res?;
             }
             _ = interval.tick() => {
+                state.active_connections = gateway.connections().to_vec();
                 state.uptime = start.elapsed();
+                state.status = if gateway.is_healthy() {Status::Healthy} else {Status::Unhealthy};
+
             }
         }
     };
