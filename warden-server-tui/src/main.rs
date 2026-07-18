@@ -1,32 +1,28 @@
 use crossterm::event::KeyCode;
-use ratatui::{DefaultTerminal, Frame, layout::Offset};
+use warden_server_tui::pages::home::{HomePage, HomePageState, Host, Ssl, Status};
 
 const QUIT_CHAR: char = 'q';
 
 fn main() -> anyhow::Result<()> {
-    ratatui::run(app)?;
-    Ok(())
-}
+    let mut state = HomePageState {
+        host: Host {
+            ip: [127, 0, 0, 1],
+            port: 3000,
+            ssl: Ssl::Disabled,
+        },
+        status: Status::Healthy,
+    };
 
-fn app(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
-    loop {
-        terminal.draw(render)?;
-        if let Some(k) = crossterm::event::read()?.as_key_event() {
-            if k.code == KeyCode::Char(QUIT_CHAR) {
-                break Ok(());
+    ratatui::run::<_, anyhow::Result<()>>(|terminal| {
+        loop {
+            terminal
+                .draw(|frame| frame.render_stateful_widget(HomePage, frame.area(), &mut state))?;
+            if let Some(k) = crossterm::event::read()?.as_key_event() {
+                if k.code == KeyCode::Char(QUIT_CHAR) {
+                    return Ok(());
+                }
             }
         }
-    }
-}
-
-fn render(frame: &mut Frame) {
-    frame.render_widget("Hello World", frame.area());
-    let quit_str = "Press q to quit";
-    frame.render_widget(
-        quit_str,
-        frame.area().offset(Offset::new(
-            frame.area().width as i32 - quit_str.len() as i32,
-            frame.area().height as i32 - 8,
-        )),
-    );
+    })?;
+    Ok(())
 }
