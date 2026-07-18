@@ -76,21 +76,24 @@ impl Warden {
 
     fn verify_request(
         request: &hyper::Request<hyper::body::Incoming>,
-    ) -> Result<(), Response<Full<Bytes>>> {
-        let path = path(request);
+        path: &str,
+    ) -> Result<(), ()> {
+        // public routes
         match path {
             "/favicon.ico" => return Ok(()),
+            "" => return Ok(()),
             _ => {}
         }
+
         match request.headers().get(USER_HEADER) {
-            None => return Err(r_401()),
+            None => return Err(()),
             Some(user) => {
                 if let Ok(user_str) = String::from_utf8(user.as_bytes().to_vec()) {
                     if !AUTHORIZED_USERS.contains(&user_str.as_str()) {
-                        return Err(r_401());
+                        return Err(());
                     }
                 } else {
-                    return Err(r_401());
+                    return Err(());
                 }
             }
         }
@@ -100,13 +103,15 @@ impl Warden {
     async fn serve_request(
         request: hyper::Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
-        if let Err(response) = Self::verify_request(&request) {
-            return Ok(response);
+        let path = path(&request);
+
+        if let Err(_) = Self::verify_request(&request, path) {
+            return Ok(r_401());
         }
 
-        let path = path(&request);
         match path {
             "" => Warden::hello(request).await,
+            "/authenticated" => Warden::authenticated(request).await,
             "/favicon.ico" => Ok(binary_response(
                 StatusCode::OK,
                 include_bytes!("../assets/favicon.ico"),
@@ -125,7 +130,16 @@ impl Warden {
     async fn hello(
         _: hyper::Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
-        Ok(Response::new(Full::from(Bytes::from("Hello World"))))
+        Ok(Response::new(Full::from(Bytes::from(
+            "This is an unauthenticated route.\n",
+        ))))
+    }
+    async fn authenticated(
+        _: hyper::Request<hyper::body::Incoming>,
+    ) -> Result<Response<Full<Bytes>>, Infallible> {
+        Ok(Response::new(Full::from(Bytes::from(
+            "This is an authenticated route.\n",
+        ))))
     }
 
     async fn forward(
@@ -218,27 +232,38 @@ impl Warden {
     }
 }
 
-fn binary_response(status: StatusCode, bytes: &[u8], mime_type: &str) -> Response<Full<Bytes>> {
+fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> Response<Full<Bytes>> {
     Response::builder()
         .status(status)
         .header(hyper::header::CONTENT_TYPE, mime_type)
-        .body(Full::from(Bytes::from(bytes.to_vec())))
+        .body(Full::from(Bytes::from(body.to_vec())))
         .unwrap()
 }
 
-fn html_response(status: StatusCode, bytes: &[u8]) -> Response<Full<Bytes>> {
-    binary_response(status, bytes, "text/html")
+fn string_response(status: StatusCode, body: String, mime_type: &str) -> Response<Full<Bytes>> {
+    Response::builder()
+        .status(status)
+        .header(hyper::header::CONTENT_TYPE, mime_type)
+        .body(Full::from(Bytes::from(body.into_bytes())))
+        .unwrap()
+}
+
+fn html_response(status: StatusCode, html: String) -> Response<Full<Bytes>> {
+    string_response(status, html, "text/html")
 }
 
 fn r_401() -> Response<Full<Bytes>> {
     html_response(
         StatusCode::UNAUTHORIZED,
-        include_bytes!("../assets/401.html"),
+        include_str!("../assets/401.html").to_string() + "\n",
     )
 }
 
 fn r_404() -> Response<Full<Bytes>> {
-    html_response(StatusCode::NOT_FOUND, include_bytes!("../assets/404.html"))
+    html_response(
+        StatusCode::NOT_FOUND,
+        include_str!("../assets/404.html").to_string() + "\n",
+    )
 }
 
 fn path<T>(request: &Request<T>) -> &str {
