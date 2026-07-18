@@ -31,15 +31,15 @@ impl Warden {
         let listener = TcpListener::bind(self.host).await?;
         info!("server started @ {}", self.host);
         loop {
-            select! {
+            select! {biased;
+                _ = tokio::signal::ctrl_c() => {
+                    info!("closing server");
+                    break;
+                }
                 conn = listener.accept() => {
                     if let Err(e) = self.handle_new_connection(conn).await {
                         error!("{}", e.context("failed to handle new connection"));
                     }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    info!("closing server");
-                    break;
                 }
             }
         }
