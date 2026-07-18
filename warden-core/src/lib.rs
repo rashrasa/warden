@@ -75,10 +75,10 @@ impl Warden {
 
     /// This drives the gateway until receiving a termination signal in the shell
     /// that started it.
-    pub async fn serve_forever(&mut self) -> anyhow::Result<()> {
-        while let Ok(_) = self.serve_next().await {}
-
-        Ok(())
+    pub async fn serve_async(&mut self) -> anyhow::Result<()> {
+        loop {
+            self.serve_next().await?;
+        }
     }
 
     fn verify_request(

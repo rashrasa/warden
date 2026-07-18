@@ -1,6 +1,7 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
-use log::LevelFilter;
+use log::{LevelFilter, info};
+use tokio::select;
 use warden_core::Warden;
 
 #[tokio::main]
@@ -16,5 +17,17 @@ async fn main() -> anyhow::Result<()> {
     )))
     .await?;
 
-    warden.serve_forever().await
+    loop {
+        select! {
+            res = warden.serve_async() => {
+                res?;
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("closing server");
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }
