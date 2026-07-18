@@ -70,7 +70,7 @@ impl Warden {
 
     pub fn is_healthy(&self) -> bool {
         // TODO: implement health check for gateway
-        false
+        true
     }
 
     /// This drives the gateway until receiving a termination signal in the shell
