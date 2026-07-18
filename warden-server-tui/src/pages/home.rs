@@ -3,6 +3,7 @@ use std::{net::SocketAddr, time::Duration};
 use ratatui::{
     layout::Offset,
     style::Style,
+    text::Line,
     widgets::{Block, Borders, StatefulWidget, Widget},
 };
 
@@ -45,6 +46,15 @@ impl StatefulWidget for HomePage {
             .borders(Borders::ALL)
             .border_style(Style::default().cyan())
             .render(area, buf);
+        let quit_hint = "Press q to quit";
+        let quit_text = Line::from(quit_hint);
+        quit_text.render(
+            area.offset(Offset {
+                x: area.width as i32 - quit_hint.len() as i32 - 4,
+                y: 0,
+            }),
+            buf,
+        );
 
         let mut status = StyledLabelledText {
             label: "Status".into(),
