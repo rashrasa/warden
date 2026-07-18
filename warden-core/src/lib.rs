@@ -19,30 +19,58 @@ const USER_HEADER: &str = "x-warden-user";
 const AUTHORIZED_USERS: [&str; 2] = ["user1", "user2"];
 
 pub struct Warden {
+    inner: WardenInnerState,
+}
+
+// Tasks:
+//   - Accept connections and spawn handler
+//   - Perform health checks
+//   - Wait for termination signal
+struct WardenInnerState {
     host: SocketAddr,
+    listener: TcpListener,
+    lifetime_connections: usize,
 }
 
 impl Warden {
-    pub fn new(host: SocketAddr) -> Self {
-        Self { host }
+    pub async fn bind(host: SocketAddr) -> anyhow::Result<Self> {
+        let listener = TcpListener::bind(host).await?;
+
+        info!("server started @ {}", host);
+        Ok(Self {
+            inner: WardenInnerState {
+                host,
+                listener,
+                lifetime_connections: 0,
+            },
+        })
     }
 
-    pub async fn serve(&mut self) -> anyhow::Result<()> {
-        let listener = TcpListener::bind(self.host).await?;
-        info!("server started @ {}", self.host);
-        loop {
-            select! {biased;
-                _ = tokio::signal::ctrl_c() => {
-                    info!("closing server");
-                    break;
+    pub async fn serve_next(&mut self) -> anyhow::Result<()> {
+        select! {
+            conn = self.inner.listener.accept() => {
+                if let Err(e) = self.handle_new_connection(conn).await {
+                    error!("{}", e.context("failed to handle new connection"));
                 }
-                conn = listener.accept() => {
-                    if let Err(e) = self.handle_new_connection(conn).await {
-                        error!("{}", e.context("failed to handle new connection"));
-                    }
-                }
+                Ok(())
             }
         }
+    }
+
+    pub fn host(&self) -> &SocketAddr {
+        &self.inner.host
+    }
+
+    pub fn is_healthy(&self) -> bool {
+        // TODO: implement health check for gateway
+        true
+    }
+
+    /// This drives the gateway until receiving a termination signal in the shell
+    /// that started it.
+    pub async fn serve_forever(&mut self) -> anyhow::Result<()> {
+        while let Ok(_) = self.serve_next().await {}
+
         Ok(())
     }
 
@@ -164,6 +192,7 @@ impl Warden {
         let (stream, addr) = conn.with_context(|| "failed to open connection")?;
         trace!("new connection: {}", addr);
         self.spawn_connection_handler(stream).await;
+        self.inner.lifetime_connections += 1;
 
         Ok(())
     }
@@ -182,6 +211,10 @@ impl Warden {
                 );
             }
         });
+    }
+
+    pub fn lifetime_connections(&self) -> usize {
+        self.inner.lifetime_connections
     }
 }
 

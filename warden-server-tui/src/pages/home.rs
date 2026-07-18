@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use ratatui::{
     layout::Offset,
     style::Style,
@@ -16,14 +18,14 @@ pub enum Ssl {
 }
 
 pub struct Host {
-    pub ip: [u8; 4],
-    pub port: u16,
+    pub host: SocketAddr,
     pub ssl: Ssl,
 }
 
 pub struct HomePageState {
     pub host: Host,
     pub status: Status,
+    pub lifetime_connections: usize,
 }
 
 pub struct HomePage;
@@ -49,23 +51,16 @@ impl StatefulWidget for HomePage {
                 Status::Healthy => "Healthy".into(),
                 Status::Unhealthy => "Unhealthy".into(),
             },
-            label_style: Style::default().green(),
-            value_style: Style::new().gray(),
+            label_style: Style::default().gray(),
+            value_style: Style::default().gray(),
         };
         status.render(area.offset(Offset { x: 1, y: 1 }), buf);
 
         let mut host = StyledLabelledText {
             label: "Host".into(),
-            label_style: Style::default().green(),
+            value: state.host.host.to_string(),
 
-            value: format!(
-                "{}.{}.{}.{}:{}",
-                state.host.ip[0],
-                state.host.ip[1],
-                state.host.ip[2],
-                state.host.ip[3],
-                state.host.port
-            ),
+            label_style: Style::default().gray(),
             value_style: Style::default().gray(),
         };
         host.render(area.offset(Offset { x: 1, y: 2 }), buf);
@@ -76,10 +71,19 @@ impl StatefulWidget for HomePage {
                 Ssl::Disabled => "Disabled".into(),
             },
 
-            label_style: Style::default().green(),
+            label_style: Style::default().gray(),
             value_style: Style::default().gray(),
         };
 
         ssl.render(area.offset(Offset { x: 1, y: 3 }), buf);
+
+        let mut connections = StyledLabelledText {
+            label: "Lifetime Connections".into(),
+            value: format!("{}", state.lifetime_connections),
+
+            label_style: Style::default().gray(),
+            value_style: Style::default().green(),
+        };
+        connections.render(area.offset(Offset { x: 1, y: 4 }), buf);
     }
 }

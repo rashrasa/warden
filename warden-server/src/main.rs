@@ -10,10 +10,11 @@ async fn main() -> anyhow::Result<()> {
         .filter_level(LevelFilter::Trace)
         .init();
 
-    let mut warden = Warden::new(SocketAddr::V4(SocketAddrV4::new(
+    let mut warden = Warden::bind(SocketAddr::V4(SocketAddrV4::new(
         Ipv4Addr::new(127, 0, 0, 1),
         3000,
-    )));
+    )))
+    .await?;
 
-    warden.serve().await
+    warden.serve_forever().await
 }
