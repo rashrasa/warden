@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["warden-core", "warden-server", "warden-server-tui"]
+default-members = ["warden-server-tui"]
 
 [workspace.dependencies]
 warden-core = { path = "warden-core" }
