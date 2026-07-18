@@ -1,10 +1,10 @@
 use ratatui::{
-    buffer::Buffer,
-    layout::{Offset, Rect},
+    layout::Offset,
     style::Style,
-    text::{Line, Text},
     widgets::{Block, Borders, StatefulWidget, Widget},
 };
+
+use crate::components::text::StyledLabelledText;
 
 pub enum Status {
     Healthy,
@@ -81,34 +81,5 @@ impl StatefulWidget for HomePage {
         };
 
         ssl.render(area.offset(Offset { x: 1, y: 3 }), buf);
-    }
-}
-
-struct StyledLabelledText {
-    label: String,
-    label_style: Style,
-
-    value: String,
-    value_style: Style,
-}
-
-impl StyledLabelledText {
-    const LABEL_DELIM: &'static str = ": ";
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        let mut host_label = Text::default();
-        host_label
-            .push_line(Line::from(self.label.clone() + Self::LABEL_DELIM).style(self.label_style));
-        host_label.render(area.offset(Offset { x: 0, y: 0 }), buf);
-
-        let mut text = Text::default();
-        text.push_line(Line::from(self.value.clone()).style(self.value_style));
-        text.render(
-            area.offset(Offset {
-                x: self.label.len() as i32 + Self::LABEL_DELIM.len() as i32,
-                y: 0,
-            }),
-            buf,
-        );
     }
 }
