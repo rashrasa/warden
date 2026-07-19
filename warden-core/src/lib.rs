@@ -1,4 +1,6 @@
-use std::{convert::Infallible, net::SocketAddr};
+mod auth;
+mod core;
+mod router;
 
 use anyhow::Context;
 use http_body_util::{BodyExt, Full};
@@ -10,13 +12,16 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use log::{error, info, trace};
+use std::{convert::Infallible, net::SocketAddr};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
 };
 
-const USER_HEADER: &str = "x-warden-user";
-const AUTHORIZED_USERS: [&str; 2] = ["user1", "user2"];
+use crate::{
+    auth::{AuthProvider, DefaultAuthProvider},
+    core::{binary_response, path, r_401, r_404, r_500, string_response},
+};
 
 pub struct Warden {
     inner: WardenInnerState,
@@ -76,40 +81,23 @@ impl Warden {
         }
     }
 
-    fn verify_request(
-        request: &hyper::Request<hyper::body::Incoming>,
-        path: &str,
-    ) -> Result<(), ()> {
-        // public routes
-        match path {
-            "/favicon.ico" => return Ok(()),
-            "/status" => return Ok(()),
-            "" => return Ok(()),
-            _ => {}
-        }
-
-        match request.headers().get(USER_HEADER) {
-            None => return Err(()),
-            Some(user) => {
-                if let Ok(user_str) = String::from_utf8(user.as_bytes().to_vec()) {
-                    if !AUTHORIZED_USERS.contains(&user_str.as_str()) {
-                        return Err(());
-                    }
-                } else {
-                    return Err(());
-                }
-            }
-        }
-        Ok(())
-    }
-
     async fn serve_request(
         request: hyper::Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let path = path(&request);
 
-        if Self::verify_request(&request, path).is_err() {
-            return Ok(r_401());
+        let verified = DefaultAuthProvider::verify_request(&request);
+
+        match verified {
+            Ok(v) => {
+                if !v {
+                    return Ok(r_401());
+                }
+            }
+            Err(e) => {
+                error!("{}", e.context("error verifying request"));
+                return Ok(r_500());
+            }
         }
 
         match path {
@@ -232,47 +220,4 @@ impl Warden {
     pub fn connections(&self) -> &[ConnectionInfo] {
         &self.inner.connections
     }
-}
-
-fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> Response<Full<Bytes>> {
-    Response::builder()
-        .status(status)
-        .header(hyper::header::CONTENT_TYPE, mime_type)
-        .body(Full::from(Bytes::from(body.to_vec())))
-        .unwrap()
-}
-
-fn string_response(status: StatusCode, body: &str, mime_type: &str) -> Response<Full<Bytes>> {
-    Response::builder()
-        .status(status)
-        .header(hyper::header::CONTENT_TYPE, mime_type)
-        .body(Full::from(Bytes::from(body.as_bytes().to_vec())))
-        .unwrap()
-}
-
-fn html_response(status: StatusCode, html: &str) -> Response<Full<Bytes>> {
-    string_response(status, html, "text/html")
-}
-
-fn r_401() -> Response<Full<Bytes>> {
-    html_response(
-        StatusCode::UNAUTHORIZED,
-        &(include_str!("../assets/401.html").to_string() + "\n"),
-    )
-}
-
-fn r_404() -> Response<Full<Bytes>> {
-    html_response(
-        StatusCode::NOT_FOUND,
-        &(include_str!("../assets/404.html").to_string() + "\n"),
-    )
-}
-
-fn path<T>(request: &Request<T>) -> &str {
-    let mut path = request.uri().path();
-    if let Some(p) = path.strip_suffix("/") {
-        path = p;
-    }
-
-    path
 }
