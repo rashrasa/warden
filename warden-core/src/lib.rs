@@ -100,7 +100,7 @@ impl Warden {
                 }
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     async fn serve_request(
@@ -108,7 +108,7 @@ impl Warden {
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let path = path(&request);
 
-        if let Err(_) = Self::verify_request(&request, path) {
+        if Self::verify_request(&request, path).is_err() {
             return Ok(r_401());
         }
 
@@ -120,11 +120,7 @@ impl Warden {
                 include_bytes!("../assets/favicon.ico"),
                 "image/x-icon",
             )),
-            "/status" => Ok(string_response(
-                StatusCode::OK,
-                "Healthy".into(),
-                "text/plain",
-            )),
+            "/status" => Ok(string_response(StatusCode::OK, "Healthy", "text/plain")),
             "/generate_204" => {
                 Warden::forward(Uri::from_static("http://google.ca/generate_204"), request).await
             }
