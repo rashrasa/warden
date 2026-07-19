@@ -68,11 +68,6 @@ impl Warden {
         &self.inner.host
     }
 
-    pub fn is_healthy(&self) -> bool {
-        // TODO: implement health check for gateway
-        true
-    }
-
     /// This drives the gateway until receiving a termination signal in the shell
     /// that started it.
     pub async fn serve_async(&mut self) -> anyhow::Result<()> {
@@ -88,6 +83,7 @@ impl Warden {
         // public routes
         match path {
             "/favicon.ico" => return Ok(()),
+            "/status" => return Ok(()),
             "" => return Ok(()),
             _ => {}
         }
@@ -123,6 +119,11 @@ impl Warden {
                 StatusCode::OK,
                 include_bytes!("../assets/favicon.ico"),
                 "image/x-icon",
+            )),
+            "/status" => Ok(string_response(
+                StatusCode::OK,
+                "Healthy".into(),
+                "text/plain",
             )),
             "/generate_204" => {
                 Warden::forward(Uri::from_static("http://google.ca/generate_204"), request).await

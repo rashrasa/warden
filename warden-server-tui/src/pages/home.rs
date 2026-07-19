@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use ratatui::{
     layout::Offset,
@@ -10,9 +14,11 @@ use warden_core::ConnectionInfo;
 
 use crate::components::text::StyledLabelledText;
 
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum Status {
     Healthy,
     Unhealthy,
+    Unknown,
 }
 
 pub enum Ssl {
@@ -34,7 +40,7 @@ pub struct HomePageState {
 pub struct HomePage;
 
 impl StatefulWidget for HomePage {
-    type State = HomePageState;
+    type State = Arc<Mutex<HomePageState>>;
 
     fn render(
         self,
@@ -42,6 +48,7 @@ impl StatefulWidget for HomePage {
         buf: &mut ratatui::prelude::Buffer,
         state: &mut Self::State,
     ) {
+        let state = state.lock().unwrap();
         Block::default()
             .title("Home")
             .borders(Borders::ALL)
@@ -63,6 +70,7 @@ impl StatefulWidget for HomePage {
             value: match state.status {
                 Status::Healthy => "Healthy".into(),
                 Status::Unhealthy => "Unhealthy".into(),
+                Status::Unknown => "Unknown".into(),
             },
             label_style: Style::default().yellow(),
             value_style: Style::default().gray(),
