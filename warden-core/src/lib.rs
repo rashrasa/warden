@@ -246,29 +246,29 @@ fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> Response
         .unwrap()
 }
 
-fn string_response(status: StatusCode, body: String, mime_type: &str) -> Response<Full<Bytes>> {
+fn string_response(status: StatusCode, body: &str, mime_type: &str) -> Response<Full<Bytes>> {
     Response::builder()
         .status(status)
         .header(hyper::header::CONTENT_TYPE, mime_type)
-        .body(Full::from(Bytes::from(body.into_bytes())))
+        .body(Full::from(Bytes::from(body.as_bytes().to_vec())))
         .unwrap()
 }
 
-fn html_response(status: StatusCode, html: String) -> Response<Full<Bytes>> {
+fn html_response(status: StatusCode, html: &str) -> Response<Full<Bytes>> {
     string_response(status, html, "text/html")
 }
 
 fn r_401() -> Response<Full<Bytes>> {
     html_response(
         StatusCode::UNAUTHORIZED,
-        include_str!("../assets/401.html").to_string() + "\n",
+        &(include_str!("../assets/401.html").to_string() + "\n"),
     )
 }
 
 fn r_404() -> Response<Full<Bytes>> {
     html_response(
         StatusCode::NOT_FOUND,
-        include_str!("../assets/404.html").to_string() + "\n",
+        &(include_str!("../assets/404.html").to_string() + "\n"),
     )
 }
 
