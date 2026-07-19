@@ -19,7 +19,7 @@ use tokio::{
 };
 
 use crate::{
-    auth::{AuthProvider, DefaultAuthProvider},
+    auth::{AuthProvider, Authorization, DefaultAuthProvider},
     core::{binary_response, path, r_401, r_404, r_500, string_response},
 };
 
@@ -90,7 +90,7 @@ impl Warden {
 
         match verified {
             Ok(v) => {
-                if !v {
+                if let Authorization::Blocked = v {
                     return Ok(r_401());
                 }
             }
