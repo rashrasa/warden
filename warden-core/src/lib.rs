@@ -31,7 +31,7 @@ pub struct Warden {
 impl Service<Request<Incoming>> for Warden {
     type Response = Response<Full<Bytes>>;
     type Error = anyhow::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(
         &mut self,
