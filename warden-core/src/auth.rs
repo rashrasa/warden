@@ -1,14 +1,10 @@
 use hyper::{Request, body::Incoming};
+use tower::Layer;
 
-use crate::core::path;
+use crate::{Warden, core::path};
 
 const USER_HEADER: &str = "x-warden-user";
 const AUTHORIZED_USERS: [&str; 2] = ["user1", "user2"];
-
-pub trait AuthProviderMaker {
-    type Provider;
-    fn make() -> Self::Provider;
-}
 
 pub trait AuthProvider {
     fn verify_request(request: &Request<Incoming>) -> anyhow::Result<Authorization>;
@@ -20,13 +16,6 @@ pub enum Authorization {
 }
 
 pub struct DefaultAuthProvider;
-impl AuthProviderMaker for DefaultAuthProvider {
-    type Provider = Self;
-
-    fn make() -> Self::Provider {
-        Self
-    }
-}
 
 impl AuthProvider for DefaultAuthProvider {
     fn verify_request(request: &Request<Incoming>) -> anyhow::Result<Authorization> {

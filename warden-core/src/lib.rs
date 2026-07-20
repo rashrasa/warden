@@ -12,11 +12,12 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use log::{error, info, trace};
-use std::{convert::Infallible, net::SocketAddr};
+use std::{net::SocketAddr, pin::Pin, task::Poll};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
 };
+use tower::Service;
 
 use crate::{
     auth::{AuthProvider, Authorization, DefaultAuthProvider},
@@ -25,6 +26,24 @@ use crate::{
 
 pub struct Warden {
     inner: WardenInnerState,
+}
+
+impl Service<Request<Incoming>> for Warden {
+    type Response = Response<Full<Bytes>>;
+    type Error = anyhow::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        // TODO: Implement rate limiting here or somewhere else
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
+        Box::pin(Self::serve_request(req))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -83,7 +102,7 @@ impl Warden {
 
     async fn serve_request(
         request: hyper::Request<hyper::body::Incoming>,
-    ) -> Result<Response<Full<Bytes>>, Infallible> {
+    ) -> anyhow::Result<Response<Full<Bytes>>> {
         let path = path(&request);
 
         let verified = DefaultAuthProvider::verify_request(&request);
@@ -121,14 +140,14 @@ impl Warden {
 
     async fn hello(
         _: hyper::Request<hyper::body::Incoming>,
-    ) -> Result<Response<Full<Bytes>>, Infallible> {
+    ) -> anyhow::Result<Response<Full<Bytes>>> {
         Ok(Response::new(Full::from(Bytes::from(
             "This is an unauthenticated route.\n",
         ))))
     }
     async fn authenticated(
         _: hyper::Request<hyper::body::Incoming>,
-    ) -> Result<Response<Full<Bytes>>, Infallible> {
+    ) -> anyhow::Result<Response<Full<Bytes>>> {
         Ok(Response::new(Full::from(Bytes::from(
             "This is an authenticated route.\n",
         ))))
@@ -137,7 +156,7 @@ impl Warden {
     async fn forward(
         url: hyper::Uri,
         incoming_request: hyper::Request<Incoming>,
-    ) -> Result<Response<Full<Bytes>>, Infallible> {
+    ) -> anyhow::Result<Response<Full<Bytes>>> {
         let ip = url.host().unwrap();
         let port = url.port_u16().unwrap_or(80);
         let authority = url.authority().unwrap().clone();
