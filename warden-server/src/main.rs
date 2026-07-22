@@ -8,7 +8,7 @@ use warden_core::Warden;
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::new()
         .target(env_logger::Target::Stdout)
-        .filter_level(LevelFilter::Trace)
+        .filter_level(LevelFilter::Info)
         .init();
 
     let mut warden = Warden::bind(SocketAddr::V4(SocketAddrV4::new(
