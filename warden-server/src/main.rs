@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut warden = Warden::bind(SocketAddr::V4(SocketAddrV4::new(
         Ipv4Addr::new(127, 0, 0, 1),
-        3000,
+        443,
     )))
     .await?;
 

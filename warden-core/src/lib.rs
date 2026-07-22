@@ -7,10 +7,10 @@ use http_body_util::{BodyExt, Full};
 use hyper::{
     Request, Response, StatusCode, Uri,
     body::{Bytes, Incoming},
-    server::conn::http1,
+    server::conn::{http1, http2},
     service::service_fn,
 };
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{error, info, trace};
 use rustls::{
     ServerConfig,
@@ -77,7 +77,7 @@ impl Warden {
             .collect::<Result<Vec<_>, _>>()
             .with_context(|| "failed to read cert file")?;
 
-        let key = PrivateKeyDer::from_pem_file("temp/server.pem")
+        let key = PrivateKeyDer::from_pem_file("temp/server.key")
             .with_context(|| "failed to read private key file")?;
 
         let mut server_config = ServerConfig::builder()
@@ -89,7 +89,7 @@ impl Warden {
             vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
         let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
 
-        let listener = TcpListener::bind(host).await?;
+        let listener: TcpListener = TcpListener::bind(host).await?;
 
         info!("server started @ {}", host);
 
@@ -255,17 +255,17 @@ impl Warden {
             {
                 Ok(tls_stream) => tls_stream,
                 Err(e) => {
-                    error!("{e}");
+                    error!("{e:#}");
                     return;
                 }
             };
             let io = TokioIo::new(tls_stream);
-            if let Err(e) = http1::Builder::new()
+            if let Err(e) = http2::Builder::new(TokioExecutor::new())
                 .serve_connection(io, service_fn(Warden::serve_request))
                 .await
             {
                 error!(
-                    "{}",
+                    "{:#}",
                     anyhow::Error::from(e).context("failed to serve request")
                 );
             }
