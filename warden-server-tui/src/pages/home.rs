@@ -1,13 +1,14 @@
 use std::{
+    io::Write,
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use ratatui::{
-    layout::Offset,
+    layout::{Offset, Size},
     style::Style,
-    text::Line,
+    text::{Line, Text},
     widgets::{Block, Borders, StatefulWidget, Widget},
 };
 use warden_core::ConnectionInfo;
@@ -30,11 +31,25 @@ pub struct Host {
     pub ssl: Ssl,
 }
 
+#[derive(Clone)]
+pub struct LogBuf {
+    pub inner: Arc<Mutex<Vec<u8>>>,
+}
+
+impl Write for LogBuf {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.inner.lock().unwrap().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.lock().unwrap().flush()
+    }
+}
+
 pub struct HomePageState {
     pub host: Host,
     pub status: Status,
     pub uptime: Duration,
-    pub active_connections: Vec<ConnectionInfo>,
 }
 
 pub struct HomePage;
@@ -48,7 +63,7 @@ impl StatefulWidget for HomePage {
         buf: &mut ratatui::prelude::Buffer,
         state: &mut Self::State,
     ) {
-        let state = state.lock().unwrap();
+        let mut state = state.lock().unwrap();
         Block::default()
             .title("Home")
             .borders(Borders::ALL)
@@ -108,22 +123,6 @@ impl StatefulWidget for HomePage {
             value_style: Style::default().gray(),
         };
         uptime.render(area.offset(Offset { x: 1, y }), buf);
-        y += 2;
-
-        for conn in &state.active_connections {
-            let mut connections = StyledLabelledText {
-                label: format!("{}", conn.host),
-                value: if let Some(ua) = &conn.user_agent {
-                    format!("{}", ua)
-                } else {
-                    "No additional info".into()
-                },
-
-                label_style: Style::default().yellow(),
-                value_style: Style::default().gray(),
-            };
-            connections.render(area.offset(Offset { x: 1, y }), buf);
-            y += 1;
-        }
+        y += 8;
     }
 }

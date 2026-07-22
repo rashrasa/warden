@@ -12,11 +12,16 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use log::{error, info, trace};
-use std::{net::SocketAddr, pin::Pin, task::Poll};
+use rustls::{
+    ServerConfig,
+    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+};
+use std::{net::SocketAddr, pin::Pin, sync::Arc, task::Poll};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
 };
+use tokio_rustls::TlsAcceptor;
 use tower::Service;
 
 use crate::{
@@ -59,11 +64,31 @@ pub struct ConnectionInfo {
 struct WardenInnerState {
     host: SocketAddr,
     listener: TcpListener,
+    tls_acceptor: TlsAcceptor,
     connections: Vec<ConnectionInfo>,
 }
 
 impl Warden {
     pub async fn bind(host: SocketAddr) -> anyhow::Result<Self> {
+        // Setup TLS
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let certs = CertificateDer::pem_file_iter("temp/server.crt")?
+            .collect::<Result<Vec<_>, _>>()
+            .with_context(|| "failed to read cert file")?;
+
+        let key = PrivateKeyDer::from_pem_file("temp/server.pem")
+            .with_context(|| "failed to read private key file")?;
+
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .with_context(|| "failed to create TLS server config")?;
+
+        server_config.alpn_protocols =
+            vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+        let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+
         let listener = TcpListener::bind(host).await?;
 
         info!("server started @ {}", host);
@@ -72,6 +97,7 @@ impl Warden {
             inner: WardenInnerState {
                 host,
                 listener,
+                tls_acceptor,
                 connections: vec![],
             },
         })
@@ -220,8 +246,20 @@ impl Warden {
             host: addr,
             user_agent: None,
         });
+        let acceptor = self.inner.tls_acceptor.clone();
         tokio::spawn(async move {
-            let io = TokioIo::new(stream);
+            let tls_stream = match acceptor
+                .accept(stream)
+                .await
+                .with_context(|| "failed to perform tls handshake")
+            {
+                Ok(tls_stream) => tls_stream,
+                Err(e) => {
+                    error!("{e}");
+                    return;
+                }
+            };
+            let io = TokioIo::new(tls_stream);
             if let Err(e) = http1::Builder::new()
                 .serve_connection(io, service_fn(Warden::serve_request))
                 .await
