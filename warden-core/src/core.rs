@@ -1,52 +1,244 @@
-use http_body_util::Full;
-use hyper::{Request, Response, StatusCode, body::Bytes};
+use anyhow::Context;
+use http_body_util::{BodyExt, Full};
+use hyper::{
+    body::{Bytes, Incoming},
+    server::conn::http2,
+    service::service_fn,
+};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use log::{error, info, trace};
+use rustls::{
+    ServerConfig,
+    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    select,
+};
+use tokio_rustls::TlsAcceptor;
 
-pub fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> Response<Full<Bytes>> {
-    Response::builder()
-        .status(status)
-        .header(hyper::header::CONTENT_TYPE, mime_type)
-        .body(Full::from(Bytes::from(body.to_vec())))
-        .unwrap()
+use crate::{
+    auth::{AuthProvider, Authorization, DefaultAuthProvider},
+    router::Router,
+    utils::{path, r_401, r_404, r_500},
+};
+use hyper::{Request, Response};
+
+// Tasks:
+//   - Accept connections and spawn handler
+//   - Perform health checks
+//   - Wait for termination signal
+struct WardenInnerState {
+    host: SocketAddr,
+    listener: TcpListener,
+    tls_acceptor: TlsAcceptor,
+    connections: Vec<ConnectionInfo>,
+    router: Router,
 }
 
-pub fn string_response(status: StatusCode, body: &str, mime_type: &str) -> Response<Full<Bytes>> {
-    Response::builder()
-        .status(status)
-        .header(hyper::header::CONTENT_TYPE, mime_type)
-        .body(Full::from(Bytes::from(body.as_bytes().to_vec())))
-        .unwrap()
-}
+impl Warden {
+    pub async fn bind(host: SocketAddr) -> anyhow::Result<Self> {
+        // Setup TLS
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-pub fn html_response(status: StatusCode, html: &str) -> Response<Full<Bytes>> {
-    string_response(status, html, "text/html")
-}
+        let certs = CertificateDer::pem_file_iter("temp/server.crt")?
+            .collect::<Result<Vec<_>, _>>()
+            .with_context(|| "failed to read cert file")?;
 
-pub fn r_401() -> Response<Full<Bytes>> {
-    html_response(
-        StatusCode::UNAUTHORIZED,
-        &(include_str!("../assets/401.html").to_string() + "\n"),
-    )
-}
+        let key = PrivateKeyDer::from_pem_file("temp/server.key")
+            .with_context(|| "failed to read private key file")?;
 
-pub fn r_404() -> Response<Full<Bytes>> {
-    html_response(
-        StatusCode::NOT_FOUND,
-        &(include_str!("../assets/404.html").to_string() + "\n"),
-    )
-}
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .with_context(|| "failed to create TLS server config")?;
 
-pub fn r_500() -> Response<Full<Bytes>> {
-    html_response(
-        StatusCode::NOT_FOUND,
-        &(include_str!("../assets/500.html").to_string() + "\n"),
-    )
-}
+        server_config.alpn_protocols =
+            vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+        let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
 
-pub fn path<T>(request: &Request<T>) -> &str {
-    let mut path = request.uri().path();
-    if let Some(p) = path.strip_suffix("/") {
-        path = p;
+        let listener: TcpListener = TcpListener::bind(host).await?;
+
+        info!("server started @ {}", host);
+
+        Ok(Self {
+            inner: WardenInnerState {
+                host,
+                listener,
+                tls_acceptor,
+                connections: vec![],
+                router: Router::new(),
+            },
+        })
     }
 
-    path
+    pub async fn serve_next(&mut self) -> anyhow::Result<()> {
+        select! {
+            conn = self.inner.listener.accept() => {
+                if let Err(e) = self.handle_new_connection(conn).await {
+                    error!("{}", e.context("failed to handle new connection"));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub fn host(&self) -> &SocketAddr {
+        &self.inner.host
+    }
+
+    /// This drives the gateway until receiving a termination signal in the shell
+    /// that started it.
+    pub async fn serve_async(&mut self) -> anyhow::Result<()> {
+        loop {
+            self.serve_next().await?;
+        }
+    }
+
+    async fn serve_request(
+        request: hyper::Request<hyper::body::Incoming>,
+    ) -> anyhow::Result<crate::Response> {
+        let path = path(&request);
+
+        let verified = DefaultAuthProvider::verify_request(&request);
+
+        match verified {
+            Ok(v) => {
+                if let Authorization::Blocked = v {
+                    return Ok(r_401());
+                }
+            }
+            Err(e) => {
+                error!("{}", e.context("error verifying request"));
+                return Ok(r_500());
+            }
+        }
+
+        Ok(r_404())
+    }
+
+    async fn hello(
+        _: hyper::Request<hyper::body::Incoming>,
+    ) -> anyhow::Result<Response<Full<Bytes>>> {
+        Ok(Response::new(Full::from(Bytes::from(
+            "This is an unauthenticated route.\n",
+        ))))
+    }
+    async fn authenticated(
+        _: hyper::Request<hyper::body::Incoming>,
+    ) -> anyhow::Result<Response<Full<Bytes>>> {
+        Ok(Response::new(Full::from(Bytes::from(
+            "This is an authenticated route.\n",
+        ))))
+    }
+
+    async fn forward(
+        url: hyper::Uri,
+        incoming_request: hyper::Request<Incoming>,
+    ) -> anyhow::Result<Response<Full<Bytes>>> {
+        let ip = url.host().unwrap();
+        let port = url.port_u16().unwrap_or(80);
+        let authority = url.authority().unwrap().clone();
+
+        // TODO: Handle errors cleanly, ensuring internal errors like host parsing and connection establishment are returned as generic 500s
+
+        let stream = TcpStream::connect(format!("{}:{}", ip, port))
+            .await
+            .unwrap();
+
+        let io = TokioIo::new(stream);
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.unwrap();
+
+        tokio::spawn(async move {
+            if let Err(e) = conn.await {
+                error!("connection failed: {:?}", e)
+            }
+        });
+        let mut request = Request::builder()
+            .uri(&url)
+            .method(incoming_request.method())
+            .header(hyper::header::HOST, authority.as_str());
+
+        for (name, value) in incoming_request.headers() {
+            if name != hyper::header::HOST {
+                request = request.header(name, value);
+            }
+        }
+
+        let request = request.body(incoming_request.into_body()).unwrap();
+        let headers = request.headers().clone();
+
+        let (parts, body) = sender
+            .send_request(request)
+            .await
+            .with_context(|| format!("failed to send request with headers: {:?}", headers))
+            .unwrap()
+            .into_parts();
+        let body = body.collect().await.unwrap().to_bytes();
+
+        trace!(
+            "received response from {url}:\n\nStatus: {}\nBody: {}",
+            parts.status.clone(),
+            String::from_utf8(body.to_vec()).unwrap()
+        );
+
+        let response = Response::builder()
+            .status(parts.status)
+            .body(Full::from(body))
+            .unwrap();
+        Ok(response)
+    }
+
+    async fn handle_new_connection(
+        &mut self,
+        conn: std::io::Result<(TcpStream, SocketAddr)>,
+    ) -> anyhow::Result<()> {
+        let (stream, addr) = conn.with_context(|| "failed to open connection")?;
+        trace!("new connection: {}", addr);
+        self.inner.connections.push(ConnectionInfo {
+            host: addr,
+            user_agent: None,
+        });
+        let acceptor = self.inner.tls_acceptor.clone();
+        tokio::spawn(async move {
+            let tls_stream = match acceptor
+                .accept(stream)
+                .await
+                .with_context(|| "failed to perform tls handshake")
+            {
+                Ok(tls_stream) => tls_stream,
+                Err(e) => {
+                    error!("{e:#}");
+                    return;
+                }
+            };
+            let io = TokioIo::new(tls_stream);
+            if let Err(e) = http2::Builder::new(TokioExecutor::new())
+                .serve_connection(io, service_fn(Warden::serve_request))
+                .await
+            {
+                error!(
+                    "{:#}",
+                    anyhow::Error::from(e).context("failed to serve request")
+                );
+            }
+        });
+
+        Ok(())
+    }
+
+    pub fn connections(&self) -> &[ConnectionInfo] {
+        &self.inner.connections
+    }
+}
+
+pub struct Warden {
+    inner: WardenInnerState,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectionInfo {
+    pub host: SocketAddr,
+    pub user_agent: Option<String>,
 }

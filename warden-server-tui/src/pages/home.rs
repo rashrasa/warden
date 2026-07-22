@@ -6,12 +6,11 @@ use std::{
 };
 
 use ratatui::{
-    layout::{Offset, Size},
+    layout::Offset,
     style::Style,
-    text::{Line, Text},
+    text::Line,
     widgets::{Block, Borders, StatefulWidget, Widget},
 };
-use warden_core::ConnectionInfo;
 
 use crate::components::text::StyledLabelledText;
 
@@ -63,7 +62,7 @@ impl StatefulWidget for HomePage {
         buf: &mut ratatui::prelude::Buffer,
         state: &mut Self::State,
     ) {
-        let mut state = state.lock().unwrap();
+        let state = state.lock().unwrap();
         Block::default()
             .title("Home")
             .borders(Borders::ALL)

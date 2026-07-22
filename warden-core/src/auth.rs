@@ -1,7 +1,6 @@
 use hyper::{Request, body::Incoming};
-use tower::Layer;
 
-use crate::{Warden, core::path};
+use crate::utils::path;
 
 const USER_HEADER: &str = "x-warden-user";
 const AUTHORIZED_USERS: [&str; 2] = ["user1", "user2"];
