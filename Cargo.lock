@@ -2766,7 +2766,6 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
- "tower",
 ]
 
 [[package]]
