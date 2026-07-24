@@ -1,40 +1,71 @@
 use anyhow::Context;
-use http_body_util::{BodyExt, Full};
-use hyper::{
-    body::{Bytes, Incoming},
-    server::conn::http2,
-    service::service_fn,
-};
+use http_body_util::Full;
+use hyper::{body::Bytes, server::conn::http2, service::service_fn};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{error, info, trace};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    path::Path,
+    sync::Arc,
+};
 use tokio::{
+    fs::File,
+    io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
+    sync::{Mutex, RwLock},
 };
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
     auth::{AuthProvider, Authorization, DefaultAuthProvider},
-    router::Router,
     utils::{path, r_401, r_404, r_500},
 };
-use hyper::{Request, Response};
 
 // Tasks:
 //   - Accept connections and spawn handler
 //   - Perform health checks
 //   - Wait for termination signal
-struct WardenInnerState {
+struct WardenState {
+    connections: Vec<ConnectionInfo>,
+}
+
+struct WardenRouter {
+    upstream: HashMap<String, Upstream>,
+}
+
+impl Default for WardenRouter {
+    fn default() -> Self {
+        let mut upstream = HashMap::new();
+
+        upstream.insert(
+            String::from(""),
+            Upstream {
+                source: Source::Html(include_bytes!("../assets/hello.html").to_vec()),
+            },
+        );
+
+        Self { upstream }
+    }
+}
+
+#[derive(Clone)]
+pub struct Warden {
+    inner: Arc<WardenInner>,
+}
+
+pub struct WardenInner {
     host: SocketAddr,
     listener: TcpListener,
     tls_acceptor: TlsAcceptor,
-    connections: Vec<ConnectionInfo>,
-    router: Router,
+
+    state: Mutex<WardenState>,
+    router: Arc<WardenRouter>,
 }
 
 impl Warden {
@@ -62,14 +93,20 @@ impl Warden {
 
         info!("server started @ {}", host);
 
+        let state = Mutex::new(WardenState {
+            connections: vec![],
+        });
+
+        let router = Arc::new(WardenRouter::default());
+
         Ok(Self {
-            inner: WardenInnerState {
+            inner: Arc::new(WardenInner {
+                tls_acceptor,
                 host,
                 listener,
-                tls_acceptor,
-                connections: vec![],
-                router: Router::new(),
-            },
+                state,
+                router,
+            }),
         })
     }
 
@@ -88,15 +125,8 @@ impl Warden {
         &self.inner.host
     }
 
-    /// This drives the gateway until receiving a termination signal in the shell
-    /// that started it.
-    pub async fn serve_async(&mut self) -> anyhow::Result<()> {
-        loop {
-            self.serve_next().await?;
-        }
-    }
-
     async fn serve_request(
+        &self,
         request: hyper::Request<hyper::body::Incoming>,
     ) -> anyhow::Result<crate::Response> {
         let path = path(&request);
@@ -115,79 +145,11 @@ impl Warden {
             }
         }
 
-        Ok(r_404())
-    }
-
-    async fn hello(
-        _: hyper::Request<hyper::body::Incoming>,
-    ) -> anyhow::Result<Response<Full<Bytes>>> {
-        Ok(Response::new(Full::from(Bytes::from(
-            "This is an unauthenticated route.\n",
-        ))))
-    }
-    async fn authenticated(
-        _: hyper::Request<hyper::body::Incoming>,
-    ) -> anyhow::Result<Response<Full<Bytes>>> {
-        Ok(Response::new(Full::from(Bytes::from(
-            "This is an authenticated route.\n",
-        ))))
-    }
-
-    async fn forward(
-        url: hyper::Uri,
-        incoming_request: hyper::Request<Incoming>,
-    ) -> anyhow::Result<Response<Full<Bytes>>> {
-        let ip = url.host().unwrap();
-        let port = url.port_u16().unwrap_or(80);
-        let authority = url.authority().unwrap().clone();
-
-        // TODO: Handle errors cleanly, ensuring internal errors like host parsing and connection establishment are returned as generic 500s
-
-        let stream = TcpStream::connect(format!("{}:{}", ip, port))
-            .await
-            .unwrap();
-
-        let io = TokioIo::new(stream);
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.unwrap();
-
-        tokio::spawn(async move {
-            if let Err(e) = conn.await {
-                error!("connection failed: {:?}", e)
-            }
-        });
-        let mut request = Request::builder()
-            .uri(&url)
-            .method(incoming_request.method())
-            .header(hyper::header::HOST, authority.as_str());
-
-        for (name, value) in incoming_request.headers() {
-            if name != hyper::header::HOST {
-                request = request.header(name, value);
-            }
+        if let Some(upstream) = self.inner.router.upstream.get(path) {
+            upstream.call(request).await
+        } else {
+            Ok(r_404())
         }
-
-        let request = request.body(incoming_request.into_body()).unwrap();
-        let headers = request.headers().clone();
-
-        let (parts, body) = sender
-            .send_request(request)
-            .await
-            .with_context(|| format!("failed to send request with headers: {:?}", headers))
-            .unwrap()
-            .into_parts();
-        let body = body.collect().await.unwrap().to_bytes();
-
-        trace!(
-            "received response from {url}:\n\nStatus: {}\nBody: {}",
-            parts.status.clone(),
-            String::from_utf8(body.to_vec()).unwrap()
-        );
-
-        let response = Response::builder()
-            .status(parts.status)
-            .body(Full::from(body))
-            .unwrap();
-        Ok(response)
     }
 
     async fn handle_new_connection(
@@ -196,11 +158,17 @@ impl Warden {
     ) -> anyhow::Result<()> {
         let (stream, addr) = conn.with_context(|| "failed to open connection")?;
         trace!("new connection: {}", addr);
-        self.inner.connections.push(ConnectionInfo {
+
+        let mut state = self.inner.state.lock().await;
+
+        state.connections.push(ConnectionInfo {
             host: addr,
             user_agent: None,
         });
         let acceptor = self.inner.tls_acceptor.clone();
+
+        let warden = self.clone();
+
         tokio::spawn(async move {
             let tls_stream = match acceptor
                 .accept(stream)
@@ -215,7 +183,13 @@ impl Warden {
             };
             let io = TokioIo::new(tls_stream);
             if let Err(e) = http2::Builder::new(TokioExecutor::new())
-                .serve_connection(io, service_fn(Warden::serve_request))
+                .serve_connection(
+                    io,
+                    service_fn(move |r| {
+                        let warden = warden.clone();
+                        async move { warden.serve_request(r).await }
+                    }),
+                )
                 .await
             {
                 error!(
@@ -228,17 +202,92 @@ impl Warden {
         Ok(())
     }
 
-    pub fn connections(&self) -> &[ConnectionInfo] {
-        &self.inner.connections
+    async fn connections_snapshot(&self) -> Vec<ConnectionInfo> {
+        self.inner.state.lock().await.connections.clone()
     }
-}
-
-pub struct Warden {
-    inner: WardenInnerState,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
     pub host: SocketAddr,
     pub user_agent: Option<String>,
+}
+
+pub struct Upstream {
+    source: Source,
+}
+
+pub enum Source {
+    Html(Vec<u8>),
+    Http,
+    Https,
+}
+
+impl Upstream {
+    /// Prepare source for serving connections.
+    async fn new_html(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let display_path = path.as_ref().as_os_str();
+
+        let mut content = Vec::new();
+        let mut file = File::open(path.as_ref())
+            .await
+            .with_context(|| format!("unable to open html file at {display_path:?}"))?;
+
+        let meta = file
+            .metadata()
+            .await
+            .with_context(|| format!("unable to read metadata of html file at {display_path:?}"))?;
+
+        if meta.len() > crate::MAX_STATIC_HTML_FILE_SIZE {
+            return Err(anyhow::Error::msg(format!(
+                "html file at {display_path:?} exceeds max size {}",
+                crate::MAX_STATIC_HTML_FILE_SIZE
+            )));
+        }
+
+        file.read_to_end(&mut content)
+            .await
+            .with_context(|| format!("unable to read html file at {display_path:?}"))?;
+
+        Ok(Self {
+            source: Source::Html(content),
+        })
+    }
+
+    async fn call(&self, _request: crate::Request) -> anyhow::Result<crate::Response> {
+        match &self.source {
+            Source::Html(d) => Ok(crate::Response::new(Full::new(Bytes::from(d.clone())))),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+pub struct Downstream {
+    stream: TokioIo<TcpStream>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Role {
+    id: u64,
+    metadata: Arc<RwLock<RoleMetadata>>,
+}
+
+#[derive(Debug)]
+pub struct RoleMetadata {
+    name: String,
+    keys: HashSet<String>,
+}
+
+pub enum Ruleset {
+    AllowList(HashSet<String>),
+    BlockList(HashSet<String>),
+}
+
+impl Ruleset {
+    fn is_allowed(&self, key: &str) -> bool {
+        match self {
+            Ruleset::AllowList(l) => l.contains(key),
+            Ruleset::BlockList(l) => !l.contains(key),
+        }
+    }
 }

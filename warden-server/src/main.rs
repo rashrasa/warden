@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         select! {
-            res = warden.serve_async() => {
+            res = warden.serve_next() => {
                 res?;
             }
             _ = tokio::signal::ctrl_c() => {
