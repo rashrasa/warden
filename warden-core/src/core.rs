@@ -1,3 +1,5 @@
+pub mod config;
+
 use anyhow::Context;
 use http_body_util::Full;
 use hyper::{body::Bytes, server::conn::http2, service::service_fn};
@@ -24,6 +26,7 @@ use tokio_rustls::TlsAcceptor;
 
 use crate::{
     auth::{AuthProvider, Authorization, DefaultAuthProvider},
+    core::config::Configuration,
     utils::{path, r_401, r_404, r_500},
 };
 
@@ -41,21 +44,7 @@ struct WardenRouter {
 
 impl Default for WardenRouter {
     fn default() -> Self {
-        let mut upstream = HashMap::new();
-
-        upstream.insert(
-            String::from(""),
-            Upstream {
-                source: Source::StaticHtml(include_bytes!("../assets/hello.html").to_vec()),
-            },
-        );
-
-        upstream.insert(
-            String::from("/dynamic"),
-            Upstream {
-                source: Source::DynamicHtml(PathBuf::from("warden-core/assets/dynamic.html")),
-            },
-        );
+        let upstream = HashMap::new();
 
         Self { upstream }
     }
@@ -73,10 +62,13 @@ pub struct WardenInner {
 
     state: Mutex<WardenState>,
     router: Arc<WardenRouter>,
+    config: Arc<Configuration>,
 }
 
 impl Warden {
-    pub async fn bind(host: SocketAddr) -> anyhow::Result<Self> {
+    pub async fn bind(host: SocketAddr, config_path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let config_path = config_path.as_ref();
+
         // Setup TLS
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -113,11 +105,12 @@ impl Warden {
                 listener,
                 state,
                 router,
+                config: Arc::new(Configuration::from_path_or_default(config_path).await),
             }),
         })
     }
 
-    pub async fn serve_next(&mut self) -> anyhow::Result<()> {
+    pub async fn serve_next(&self) -> anyhow::Result<()> {
         select! {
             conn = self.inner.listener.accept() => {
                 if let Err(e) = self.handle_new_connection(conn).await {
@@ -152,7 +145,7 @@ impl Warden {
             }
         }
 
-        if let Some(upstream) = self.inner.router.upstream.get(path) {
+        if let Some(upstream) = self.inner.config.handlers.get(path) {
             upstream.call(request).await
         } else {
             Ok(r_404())
@@ -160,7 +153,7 @@ impl Warden {
     }
 
     async fn handle_new_connection(
-        &mut self,
+        &self,
         conn: std::io::Result<(TcpStream, SocketAddr)>,
     ) -> anyhow::Result<()> {
         let (stream, addr) = conn.with_context(|| "failed to open connection")?;
@@ -212,6 +205,10 @@ impl Warden {
     async fn connections_snapshot(&self) -> Vec<ConnectionInfo> {
         self.inner.state.lock().await.connections.clone()
     }
+
+    pub async fn close(&self) -> anyhow::Result<()> {
+        Ok(self.inner.config.save_if_missing().await?)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -224,6 +221,7 @@ pub struct Upstream {
     source: Source,
 }
 
+#[derive(Debug, Default)]
 pub enum Source {
     StaticHtml(Vec<u8>),
 
@@ -233,6 +231,9 @@ pub enum Source {
     DynamicHtml(PathBuf),
     Http,
     Https,
+
+    #[default]
+    Unknown,
 }
 
 impl Upstream {

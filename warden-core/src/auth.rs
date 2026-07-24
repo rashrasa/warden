@@ -26,6 +26,7 @@ impl AuthProvider for DefaultAuthProvider {
             "/status" => return Ok(Authorization::Allowed),
             "/bad-route" => return Err(anyhow::Error::msg("bad route")),
             "/dynamic" => return Ok(Authorization::Allowed),
+            "/dyn" => return Ok(Authorization::Allowed),
             "" => return Ok(Authorization::Allowed),
             _ => {}
         }

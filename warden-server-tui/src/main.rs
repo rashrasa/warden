@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
 
     let host = SocketAddr::from_str(URL).unwrap();
     let mut stream = crossterm::event::EventStream::new();
-    let mut gateway = Warden::bind(host).await?;
+    let gateway = Warden::bind(host, "./temp/config.json").await?;
 
     let mut state = Arc::new(Mutex::new(HomePageState {
         host: Host {
@@ -92,8 +92,8 @@ async fn main() -> anyhow::Result<()> {
 
         }
     };
-
     ratatui::restore();
 
+    gateway.close().await?;
     res
 }
