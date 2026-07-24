@@ -10,7 +10,7 @@ use rustls::{
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::{
@@ -46,7 +46,14 @@ impl Default for WardenRouter {
         upstream.insert(
             String::from(""),
             Upstream {
-                source: Source::Html(include_bytes!("../assets/hello.html").to_vec()),
+                source: Source::StaticHtml(include_bytes!("../assets/hello.html").to_vec()),
+            },
+        );
+
+        upstream.insert(
+            String::from("/dynamic"),
+            Upstream {
+                source: Source::DynamicHtml(PathBuf::from("warden-core/assets/dynamic.html")),
             },
         );
 
@@ -218,7 +225,12 @@ pub struct Upstream {
 }
 
 pub enum Source {
-    Html(Vec<u8>),
+    StaticHtml(Vec<u8>),
+
+    /// This type reads the HTML file each time the page is requested.
+    /// Should not be used for high traffic routes since it's more computationally
+    /// expensive.
+    DynamicHtml(PathBuf),
     Http,
     Https,
 }
@@ -250,13 +262,24 @@ impl Upstream {
             .with_context(|| format!("unable to read html file at {display_path:?}"))?;
 
         Ok(Self {
-            source: Source::Html(content),
+            source: Source::StaticHtml(content),
         })
     }
 
     async fn call(&self, _request: crate::Request) -> anyhow::Result<crate::Response> {
         match &self.source {
-            Source::Html(d) => Ok(crate::Response::new(Full::new(Bytes::from(d.clone())))),
+            Source::StaticHtml(d) => Ok(crate::Response::new(Full::new(Bytes::from(d.clone())))),
+            Source::DynamicHtml(p) => {
+                let mut buf = Vec::new();
+                File::open(p)
+                    .await
+                    .with_context(|| "could not open dynamic page")?
+                    .read_to_end(&mut buf)
+                    .await
+                    .with_context(|| "could not read dynamic page")?;
+
+                Ok(crate::Response::new(Full::new(Bytes::from(buf))))
+            }
             _ => unimplemented!(),
         }
     }
