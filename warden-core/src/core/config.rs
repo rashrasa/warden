@@ -33,6 +33,25 @@ pub enum Protocol {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
+pub struct Role {}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum Filter {
+    Allow,
+    Block,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct Permission {
+    #[serde(rename = "type")]
+    pub filter: Filter,
+    pub roles: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
 pub enum Cache {
     None,
     Static,
@@ -44,6 +63,8 @@ pub struct Location {
     pub protocol: Protocol,
     pub path: String,
     pub cache: Cache,
+    pub permission: Permission,
+
     #[serde(skip)]
     pub source: Source,
 }

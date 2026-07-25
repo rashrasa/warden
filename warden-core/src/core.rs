@@ -25,7 +25,7 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
-    auth::{AuthProvider, Authorization, DefaultAuthProvider},
+    auth::{AuthProvider, Authorization},
     core::config::Configuration,
     utils::{path, r_401, r_404, r_500},
 };
@@ -62,6 +62,7 @@ pub struct WardenInner {
 
     state: Mutex<WardenState>,
     router: Arc<WardenRouter>,
+    auth: AuthProvider,
     config: Arc<Configuration>,
 }
 
@@ -97,6 +98,10 @@ impl Warden {
         });
 
         let router = Arc::new(WardenRouter::default());
+        let config = Arc::new(Configuration::from_path_or_default(config_path).await);
+        let auth = AuthProvider {
+            config: config.clone(),
+        };
 
         Ok(Self {
             inner: Arc::new(WardenInner {
@@ -105,7 +110,8 @@ impl Warden {
                 listener,
                 state,
                 router,
-                config: Arc::new(Configuration::from_path_or_default(config_path).await),
+                auth,
+                config,
             }),
         })
     }
@@ -131,7 +137,7 @@ impl Warden {
     ) -> anyhow::Result<crate::Response> {
         let path = path(&request);
 
-        let verified = DefaultAuthProvider::verify_request(&request);
+        let verified = self.inner.auth.verify_request(&request);
 
         match verified {
             Ok(v) => {

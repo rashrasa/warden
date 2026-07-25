@@ -45,7 +45,9 @@ pub fn r_500() -> crate::Response {
 
 pub fn path(request: &crate::Request) -> &str {
     let mut path = request.uri().path();
-    if let Some(p) = path.strip_suffix("/") {
+    if path.len() > 1
+        && let Some(p) = path.strip_suffix("/")
+    {
         path = p;
     }
 
