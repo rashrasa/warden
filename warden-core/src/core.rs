@@ -10,7 +10,7 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
@@ -20,7 +20,7 @@ use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
-    sync::{Mutex, RwLock},
+    sync::Mutex,
 };
 use tokio_rustls::TlsAcceptor;
 
@@ -288,30 +288,4 @@ impl Upstream {
 
 pub struct Downstream {
     stream: TokioIo<TcpStream>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Role {
-    id: u64,
-    metadata: Arc<RwLock<RoleMetadata>>,
-}
-
-#[derive(Debug)]
-pub struct RoleMetadata {
-    name: String,
-    keys: HashSet<String>,
-}
-
-pub enum Ruleset {
-    AllowList(HashSet<String>),
-    BlockList(HashSet<String>),
-}
-
-impl Ruleset {
-    fn is_allowed(&self, key: &str) -> bool {
-        match self {
-            Ruleset::AllowList(l) => l.contains(key),
-            Ruleset::BlockList(l) => !l.contains(key),
-        }
-    }
 }

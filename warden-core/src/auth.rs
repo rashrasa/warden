@@ -1,4 +1,7 @@
+use std::{collections::HashSet, sync::Arc};
+
 use hyper::{Request, body::Incoming};
+use tokio::sync::RwLock;
 
 use crate::utils::path;
 
@@ -42,5 +45,31 @@ impl AuthProvider for DefaultAuthProvider {
         }
 
         Ok(Authorization::Blocked)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Role {
+    id: u64,
+    metadata: Arc<RwLock<RoleMetadata>>,
+}
+
+#[derive(Debug)]
+pub struct RoleMetadata {
+    name: String,
+    keys: HashSet<String>,
+}
+
+pub enum Ruleset {
+    AllowList(HashSet<String>),
+    BlockList(HashSet<String>),
+}
+
+impl Ruleset {
+    fn is_allowed(&self, key: &str) -> bool {
+        match self {
+            Ruleset::AllowList(l) => l.contains(key),
+            Ruleset::BlockList(l) => !l.contains(key),
+        }
     }
 }
