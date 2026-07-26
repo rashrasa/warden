@@ -1,7 +1,7 @@
 pub mod config;
 
 use anyhow::Context;
-use http::Uri;
+use http::{StatusCode, Uri};
 use hyper::{client::conn::http1, server::conn::http2, service::service_fn};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{error, info, trace};
@@ -23,7 +23,7 @@ use tokio_rustls::TlsAcceptor;
 use crate::{
     auth::{AuthProvider, Authorization},
     core::config::Configuration,
-    utils::{path, r_401, r_404, r_500},
+    utils::{http_error, path},
 };
 
 #[derive(Clone)]
@@ -109,19 +109,19 @@ impl Warden {
         match verified {
             Ok(v) => {
                 if let Authorization::Blocked = v {
-                    return Ok(r_401());
+                    return Ok(http_error(StatusCode::UNAUTHORIZED));
                 }
             }
             Err(e) => {
                 error!("{}", e.context("error verifying request"));
-                return Ok(r_500());
+                return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
             }
         }
 
         if let Some(upstream) = self.inner.config.handlers.get(path) {
             upstream.call(request).await
         } else {
-            Ok(r_404())
+            Ok(http_error(StatusCode::NOT_FOUND))
         }
     }
 

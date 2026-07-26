@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
+use http::StatusCode;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper_util::rt::TokioIo;
@@ -16,11 +17,7 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::{
-    client::http1::make_http1_connection,
-    core::Source,
-    utils::{r_500, r_502},
-};
+use crate::{client::http1::make_http1_connection, core::Source, utils::http_error};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,7 +90,7 @@ impl Location {
             }
             Source::Http(uri, sender) => {
                 let host = match uri.host() {
-                    None => return Ok(r_500()),
+                    None => return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR)),
                     Some(host) => host,
                 };
                 let request = match hyper::Request::builder()
@@ -103,7 +100,7 @@ impl Location {
                     Ok(req) => req,
                     Err(err) => {
                         error!("error building downstream response: {err}");
-                        return Ok(r_500());
+                        return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
                     }
                 };
 
@@ -115,18 +112,18 @@ impl Location {
                             Ok(bytes) => bytes.to_bytes(),
                             Err(err) => {
                                 error!("error collecting upstream response: {err}");
-                                return Ok(r_500());
+                                return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
                             }
                         };
                         Ok(crate::Response::from_parts(parts, body.into()))
                     }
                     Err(err) => {
                         error!("failed to get response from upstream: {err}");
-                        Ok(r_502())
+                        Ok(http_error(StatusCode::BAD_GATEWAY))
                     }
                 }
             }
-            _ => Ok(r_500()),
+            _ => Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR)),
         }
     }
 }
