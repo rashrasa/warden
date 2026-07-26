@@ -39,7 +39,7 @@ pub fn r_404() -> crate::Response {
 
 pub fn r_500() -> crate::Response {
     html_response(
-        StatusCode::NOT_FOUND,
+        StatusCode::INTERNAL_SERVER_ERROR,
         &(include_str!("../../assets/500.html").to_string() + "\n"),
     )
 }
