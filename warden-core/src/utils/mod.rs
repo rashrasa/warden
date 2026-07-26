@@ -26,28 +26,28 @@ pub fn html_response(status: StatusCode, html: &str) -> crate::Response {
 pub fn r_401() -> crate::Response {
     html_response(
         StatusCode::UNAUTHORIZED,
-        &(include_str!("../assets/401.html").to_string() + "\n"),
+        &(include_str!("../../assets/401.html").to_string() + "\n"),
     )
 }
 
 pub fn r_404() -> crate::Response {
     html_response(
         StatusCode::NOT_FOUND,
-        &(include_str!("../assets/404.html").to_string() + "\n"),
+        &(include_str!("../../assets/404.html").to_string() + "\n"),
     )
 }
 
 pub fn r_500() -> crate::Response {
     html_response(
         StatusCode::NOT_FOUND,
-        &(include_str!("../assets/500.html").to_string() + "\n"),
+        &(include_str!("../../assets/500.html").to_string() + "\n"),
     )
 }
 
 pub fn r_502() -> crate::Response {
     html_response(
         StatusCode::BAD_GATEWAY,
-        &(include_str!("../assets/502.html").to_string() + "\n"),
+        &(include_str!("../../assets/502.html").to_string() + "\n"),
     )
 }
 
