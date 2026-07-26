@@ -5,15 +5,22 @@ use std::{
 };
 
 use anyhow::Context;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
+use hyper_util::rt::TokioIo;
+use log::error;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs::{File, create_dir_all},
     io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
 };
 
-use crate::{core::Source, utils::r_500};
+use crate::{
+    client::http1::make_http1_connection,
+    core::Source,
+    utils::{r_500, r_502},
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,7 +77,7 @@ pub struct Location {
 }
 
 impl Location {
-    pub async fn call(&self, _request: crate::Request) -> anyhow::Result<crate::Response> {
+    pub async fn call(&self, request: crate::Request) -> anyhow::Result<crate::Response> {
         match &self.source {
             Source::StaticHtml(d) => Ok(crate::Response::new(Full::new(Bytes::from(d.clone())))),
             Source::DynamicHtml(p) => {
@@ -83,6 +90,41 @@ impl Location {
                     .with_context(|| "could not read dynamic page")?;
 
                 Ok(crate::Response::new(Full::new(Bytes::from(buf))))
+            }
+            Source::Http(uri, sender) => {
+                let host = match uri.host() {
+                    None => return Ok(r_500()),
+                    Some(host) => host,
+                };
+                let request = match hyper::Request::builder()
+                    .header(http::header::HOST, host)
+                    .body(request.into_body())
+                {
+                    Ok(req) => req,
+                    Err(err) => {
+                        error!("error building downstream response: {err}");
+                        return Ok(r_500());
+                    }
+                };
+
+                // TODO: Find better way to share HTTP client
+                match sender.lock().await.send_request(request).await {
+                    Ok(res) => {
+                        let (parts, body) = res.into_parts();
+                        let body = match body.collect().await {
+                            Ok(bytes) => bytes.to_bytes(),
+                            Err(err) => {
+                                error!("error collecting upstream response: {err}");
+                                return Ok(r_500());
+                            }
+                        };
+                        Ok(crate::Response::from_parts(parts, body.into()))
+                    }
+                    Err(err) => {
+                        error!("failed to get response from upstream: {err}");
+                        Ok(r_502())
+                    }
+                }
             }
             _ => Ok(r_500()),
         }
@@ -128,7 +170,30 @@ impl Configuration {
                         Source::StaticHtml(buf)
                     }
                 },
-                _ => unimplemented!(),
+                Protocol::Http => {
+                    let url = path
+                        .parse::<hyper::Uri>()
+                        .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e))?;
+                    let host = url.host().ok_or_else(|| {
+                        std::io::Error::new(
+                            ErrorKind::InvalidInput,
+                            anyhow::anyhow!("invalid uri {path}"),
+                        )
+                    })?;
+                    let address = format!("{host}:80");
+                    let stream = TcpStream::connect(address).await?;
+                    let io = TokioIo::new(stream);
+                    let (sender, conn) = make_http1_connection(io)
+                        .await
+                        .map_err(|e| std::io::Error::new(ErrorKind::ConnectionRefused, e))?;
+                    tokio::spawn(async move {
+                        if let Err(err) = conn.await {
+                            error!("connection failed: {err:?}");
+                        }
+                    });
+                    Source::Http(url, tokio::sync::Mutex::new(sender))
+                }
+                Protocol::Https => Source::Https,
             };
         }
 

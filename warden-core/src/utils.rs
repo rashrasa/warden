@@ -1,6 +1,7 @@
 use http::StatusCode;
 use http_body_util::Full;
 use hyper::body::Bytes;
+use log::error;
 
 pub fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> crate::Response {
     hyper::Response::builder()
@@ -43,6 +44,13 @@ pub fn r_500() -> crate::Response {
     )
 }
 
+pub fn r_502() -> crate::Response {
+    html_response(
+        StatusCode::BAD_GATEWAY,
+        &(include_str!("../assets/502.html").to_string() + "\n"),
+    )
+}
+
 pub fn path(request: &crate::Request) -> &str {
     let mut path = request.uri().path();
     if path.len() > 1
@@ -52,4 +60,24 @@ pub fn path(request: &crate::Request) -> &str {
     }
 
     path
+}
+
+pub trait WardenHttpExt<T> {
+    fn ok_or_500(self) -> Result<T, crate::Response>;
+}
+
+impl<T, E> WardenHttpExt<T> for Result<T, E>
+where
+    E: std::error::Error,
+{
+    fn ok_or_500(self) -> Result<T, crate::Response> {
+        match self {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                error!("{err:?}");
+
+                Err(r_500())
+            }
+        }
+    }
 }

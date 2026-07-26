@@ -15,9 +15,9 @@ pub struct AuthProvider {
 
 #[derive(Default)]
 pub enum Authorization {
+    #[default]
     Allowed,
 
-    #[default]
     Blocked,
 }
 

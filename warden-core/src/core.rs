@@ -1,7 +1,8 @@
 pub mod config;
 
 use anyhow::Context;
-use hyper::{server::conn::http2, service::service_fn};
+use http::Uri;
+use hyper::{client::conn::http1, server::conn::http2, service::service_fn};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{error, info, trace};
 use rustls::{
@@ -181,7 +182,10 @@ pub enum Source {
     /// Should not be used for high traffic routes since it's more computationally
     /// expensive.
     DynamicHtml(PathBuf),
-    Http,
+    Http(
+        Uri,
+        tokio::sync::Mutex<http1::SendRequest<hyper::body::Incoming>>,
+    ),
     Https,
 
     #[default]

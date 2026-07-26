@@ -1,4 +1,5 @@
 mod auth;
+pub mod client;
 pub mod core;
 pub mod utils;
 
