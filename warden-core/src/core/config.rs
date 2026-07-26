@@ -13,7 +13,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
-use crate::core::Source;
+use crate::{core::Source, utils::r_500};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -84,7 +84,7 @@ impl Location {
 
                 Ok(crate::Response::new(Full::new(Bytes::from(buf))))
             }
-            _ => unimplemented!(),
+            _ => Ok(r_500()),
         }
     }
 }
@@ -111,7 +111,20 @@ impl Configuration {
                     Cache::None => Source::DynamicHtml(path.into()),
                     Cache::Static => {
                         let mut buf = vec![];
-                        File::open(&path).await?.read_to_end(&mut buf).await?;
+                        let mut file = File::open(&path).await?;
+
+                        let meta = file.metadata().await?;
+
+                        if meta.len() > crate::MAX_STATIC_HTML_FILE_SIZE {
+                            return Err(std::io::Error::new(
+                                ErrorKind::FileTooLarge,
+                                anyhow::Error::msg(format!(
+                                    "html file at {path:?} exceeds max size {}",
+                                    crate::MAX_STATIC_HTML_FILE_SIZE
+                                )),
+                            ));
+                        }
+                        file.read_to_end(&mut buf).await?;
                         Source::StaticHtml(buf)
                     }
                 },

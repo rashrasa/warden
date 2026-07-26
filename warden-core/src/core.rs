@@ -1,8 +1,7 @@
 pub mod config;
 
 use anyhow::Context;
-use http_body_util::Full;
-use hyper::{body::Bytes, server::conn::http2, service::service_fn};
+use hyper::{server::conn::http2, service::service_fn};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{error, info, trace};
 use rustls::{
@@ -10,17 +9,13 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
 };
 use std::{
-    collections::HashMap,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::{
-    fs::File,
-    io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
-    sync::Mutex,
 };
 use tokio_rustls::TlsAcceptor;
 
@@ -29,26 +24,6 @@ use crate::{
     core::config::Configuration,
     utils::{path, r_401, r_404, r_500},
 };
-
-// Tasks:
-//   - Accept connections and spawn handler
-//   - Perform health checks
-//   - Wait for termination signal
-struct WardenState {
-    connections: Vec<ConnectionInfo>,
-}
-
-struct WardenRouter {
-    upstream: HashMap<String, Upstream>,
-}
-
-impl Default for WardenRouter {
-    fn default() -> Self {
-        let upstream = HashMap::new();
-
-        Self { upstream }
-    }
-}
 
 #[derive(Clone)]
 pub struct Warden {
@@ -60,8 +35,6 @@ pub struct WardenInner {
     listener: TcpListener,
     tls_acceptor: TlsAcceptor,
 
-    state: Mutex<WardenState>,
-    router: Arc<WardenRouter>,
     auth: AuthProvider,
     config: Arc<Configuration>,
 }
@@ -93,11 +66,6 @@ impl Warden {
 
         info!("server started @ {}", host);
 
-        let state = Mutex::new(WardenState {
-            connections: vec![],
-        });
-
-        let router = Arc::new(WardenRouter::default());
         let config = Arc::new(Configuration::from_path_or_default(config_path).await);
         let auth = AuthProvider {
             config: config.clone(),
@@ -108,8 +76,6 @@ impl Warden {
                 tls_acceptor,
                 host,
                 listener,
-                state,
-                router,
                 auth,
                 config,
             }),
@@ -165,12 +131,6 @@ impl Warden {
         let (stream, addr) = conn.with_context(|| "failed to open connection")?;
         trace!("new connection: {}", addr);
 
-        let mut state = self.inner.state.lock().await;
-
-        state.connections.push(ConnectionInfo {
-            host: addr,
-            user_agent: None,
-        });
         let acceptor = self.inner.tls_acceptor.clone();
 
         let warden = self.clone();
@@ -208,23 +168,9 @@ impl Warden {
         Ok(())
     }
 
-    async fn connections_snapshot(&self) -> Vec<ConnectionInfo> {
-        self.inner.state.lock().await.connections.clone()
-    }
-
     pub async fn close(&self) -> anyhow::Result<()> {
         Ok(self.inner.config.save_if_missing().await?)
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct ConnectionInfo {
-    pub host: SocketAddr,
-    pub user_agent: Option<String>,
-}
-
-pub struct Upstream {
-    source: Source,
 }
 
 #[derive(Debug, Default)]
@@ -240,58 +186,4 @@ pub enum Source {
 
     #[default]
     Unknown,
-}
-
-impl Upstream {
-    /// Prepare source for serving connections.
-    async fn new_html(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let display_path = path.as_ref().as_os_str();
-
-        let mut content = Vec::new();
-        let mut file = File::open(path.as_ref())
-            .await
-            .with_context(|| format!("unable to open html file at {display_path:?}"))?;
-
-        let meta = file
-            .metadata()
-            .await
-            .with_context(|| format!("unable to read metadata of html file at {display_path:?}"))?;
-
-        if meta.len() > crate::MAX_STATIC_HTML_FILE_SIZE {
-            return Err(anyhow::Error::msg(format!(
-                "html file at {display_path:?} exceeds max size {}",
-                crate::MAX_STATIC_HTML_FILE_SIZE
-            )));
-        }
-
-        file.read_to_end(&mut content)
-            .await
-            .with_context(|| format!("unable to read html file at {display_path:?}"))?;
-
-        Ok(Self {
-            source: Source::StaticHtml(content),
-        })
-    }
-
-    async fn call(&self, _request: crate::Request) -> anyhow::Result<crate::Response> {
-        match &self.source {
-            Source::StaticHtml(d) => Ok(crate::Response::new(Full::new(Bytes::from(d.clone())))),
-            Source::DynamicHtml(p) => {
-                let mut buf = Vec::new();
-                File::open(p)
-                    .await
-                    .with_context(|| "could not open dynamic page")?
-                    .read_to_end(&mut buf)
-                    .await
-                    .with_context(|| "could not read dynamic page")?;
-
-                Ok(crate::Response::new(Full::new(Bytes::from(buf))))
-            }
-            _ => unimplemented!(),
-        }
-    }
-}
-
-pub struct Downstream {
-    stream: TokioIo<TcpStream>,
 }
