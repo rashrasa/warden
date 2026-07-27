@@ -27,7 +27,7 @@ use crate::{
     utils::{http_error, path},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Warden {
     inner: Arc<WardenInner>,
 }
@@ -130,11 +130,23 @@ impl Warden {
         &self,
         conn: std::io::Result<(TcpStream, SocketAddr)>,
     ) -> anyhow::Result<()> {
-        Downstream::handle_new_connection(self.clone(), self.inner.tls_acceptor.clone(), conn).await
+        Downstream::handle_new_connection(self.clone(), self.inner.tls_acceptor.clone(), conn)
+            .await?;
+        Ok(())
     }
 
     pub async fn close(&self) -> anyhow::Result<()> {
         Ok(self.inner.config.save_if_missing().await?)
+    }
+}
+
+impl std::fmt::Debug for WardenInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "Address: {:?}\nConfiguration:{:?}",
+            self.host, self.config
+        )
     }
 }
 

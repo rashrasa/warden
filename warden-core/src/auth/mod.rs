@@ -9,6 +9,7 @@ use crate::{
 
 const USER_HEADER: &str = "x-warden-user";
 
+#[derive(Debug)]
 pub struct AuthProvider {
     pub config: Arc<Configuration>,
 }
