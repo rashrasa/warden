@@ -21,6 +21,9 @@ impl Route {
         if let Some(p) = path.strip_suffix("/") {
             path = p;
         }
+        if let Some(p) = path.strip_prefix("/") {
+            path = p;
+        }
         for part in path.split("/") {
             let part = part.trim();
             if part == "*" {
@@ -93,6 +96,9 @@ impl Path {
         if let Some(p) = path.strip_suffix("/") {
             path = p;
         }
+        if let Some(p) = path.strip_prefix("/") {
+            path = p;
+        }
         let parts = path.split("/").map(|s| s.to_owned()).collect();
         Ok(Self { parts })
     }
@@ -110,11 +116,29 @@ mod test {
         let p1 = Path::new("/").unwrap();
         let p2 = Path::new("").unwrap();
 
-        println!("{:?} | {:?} || {:?} | {:?}", r1, r2, p1, p2);
-
         assert!(matches!(r1.matches(&p1), RouteMatch::Match { .. }));
         assert!(matches!(r1.matches(&p2), RouteMatch::Match { .. }));
+
         assert!(matches!(r2.matches(&p1), RouteMatch::Match { .. }));
         assert!(matches!(r2.matches(&p2), RouteMatch::Match { .. }));
+    }
+
+    #[test]
+    fn matches_wildcard() {
+        let r1 = Route::new("/auth/v1/*").unwrap();
+        let r2 = Route::new("/analytics/v2/*/test").unwrap();
+        let r3 = Route::new("/analytics/v2/test/*").unwrap();
+
+        let p1 = Path::new("/auth/v1/health/").unwrap();
+        let p2 = Path::new("analytics/v2/auth/user_abcd").unwrap();
+
+        assert!(matches!(r1.matches(&p1), RouteMatch::Match { .. }));
+        assert!(matches!(r1.matches(&p2), RouteMatch::NotMatch));
+
+        assert!(matches!(r2.matches(&p1), RouteMatch::NotMatch));
+        assert!(matches!(r2.matches(&p2), RouteMatch::Match { .. }));
+
+        assert!(matches!(r3.matches(&p1), RouteMatch::NotMatch));
+        assert!(matches!(r3.matches(&p2), RouteMatch::NotMatch));
     }
 }
