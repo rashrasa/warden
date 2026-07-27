@@ -32,9 +32,10 @@ pub fn http_error(code: StatusCode) -> crate::FullResponse {
         <body>
             <h1 style=\"text-align: center;\">{code}</h1>
             <hr />
-            <p style=\"text-align: center;\">warden/0.1.0</p>
+            <p style=\"text-align: center;\">warden/{}</p>
         </body>
-            "
+            ",
+            env!("CARGO_PKG_VERSION")
         ),
     )
 }
