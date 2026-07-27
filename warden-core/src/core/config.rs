@@ -17,7 +17,7 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::{core::Source, down::http1::make_http1_connection, utils::http_error};
+use crate::{core::Source, up::http1::make_http1_connection, utils::http_error};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
