@@ -1,4 +1,5 @@
 pub mod config;
+pub mod route;
 
 use anyhow::Context;
 use http::{StatusCode, Uri};
