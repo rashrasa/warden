@@ -3,9 +3,7 @@ pub mod route;
 
 use anyhow::Context;
 use http::{StatusCode, Uri};
-use hyper::{client::conn::http1, server::conn::http2, service::service_fn};
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use log::{error, info, trace};
+use log::{error, info};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
@@ -24,6 +22,7 @@ use tokio_rustls::TlsAcceptor;
 use crate::{
     auth::{AuthProvider, Authorization},
     core::config::Configuration,
+    down::Downstream,
     up::http1::Http1Upstream,
     utils::{http_error, path},
 };
@@ -100,7 +99,7 @@ impl Warden {
         &self.inner.host
     }
 
-    async fn serve_request(
+    pub async fn serve_request(
         &mut self,
         request: hyper::Request<hyper::body::Incoming>,
     ) -> anyhow::Result<crate::FullResponse> {
@@ -131,44 +130,7 @@ impl Warden {
         &self,
         conn: std::io::Result<(TcpStream, SocketAddr)>,
     ) -> anyhow::Result<()> {
-        let (stream, addr) = conn.with_context(|| "failed to open connection")?;
-        trace!("new connection: {}", addr);
-
-        let acceptor = self.inner.tls_acceptor.clone();
-
-        let warden = self.clone();
-
-        tokio::spawn(async move {
-            let tls_stream = match acceptor
-                .accept(stream)
-                .await
-                .with_context(|| "failed to perform tls handshake")
-            {
-                Ok(tls_stream) => tls_stream,
-                Err(e) => {
-                    error!("{e:#}");
-                    return;
-                }
-            };
-            let io = TokioIo::new(tls_stream);
-            if let Err(e) = http2::Builder::new(TokioExecutor::new())
-                .serve_connection(
-                    io,
-                    service_fn(move |r| {
-                        let mut warden = warden.clone();
-                        async move { warden.serve_request(r).await }
-                    }),
-                )
-                .await
-            {
-                error!(
-                    "{:#}",
-                    anyhow::Error::from(e).context("failed to serve request")
-                );
-            }
-        });
-
-        Ok(())
+        Downstream::handle_new_connection(self.clone(), self.inner.tls_acceptor.clone(), conn).await
     }
 
     pub async fn close(&self) -> anyhow::Result<()> {
