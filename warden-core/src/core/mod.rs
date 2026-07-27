@@ -3,6 +3,7 @@ pub mod route;
 
 use anyhow::Context;
 use http::{StatusCode, Uri};
+use hyper::service::Service;
 use log::{error, info};
 use rustls::{
     ServerConfig,
@@ -20,10 +21,10 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
-    auth::{AuthProvider, Authorization},
+    auth::{AuthService, Authorization},
     core::config::Configuration,
     down::Downstream,
-    up::http1::Http1Upstream,
+    up::{PinnedFuture, http1::Http1Upstream},
     utils::{http_error, path},
 };
 
@@ -37,7 +38,7 @@ pub struct WardenInner {
     listener: TcpListener,
     tls_acceptor: TlsAcceptor,
 
-    auth: AuthProvider,
+    service: AuthService<RouterService>,
     config: Arc<Configuration>,
 }
 
@@ -69,16 +70,15 @@ impl Warden {
         info!("server started @ {}", host);
 
         let config = Arc::new(Configuration::from_path_or_default(config_path).await);
-        let auth = AuthProvider {
-            config: config.clone(),
-        };
 
+        let service =
+            AuthService::new(Arc::clone(&config), RouterService::new(Arc::clone(&config)));
         Ok(Self {
             inner: Arc::new(WardenInner {
                 tls_acceptor,
                 host,
                 listener,
-                auth,
+                service,
                 config,
             }),
         })
@@ -99,31 +99,11 @@ impl Warden {
         &self.inner.host
     }
 
-    pub async fn serve_request(
+    pub fn serve_request(
         &mut self,
         request: hyper::Request<hyper::body::Incoming>,
-    ) -> anyhow::Result<crate::FullResponse> {
-        let path = path(&request);
-
-        let verified = self.inner.auth.verify_request(&request);
-
-        match verified {
-            Ok(v) => {
-                if let Authorization::Blocked = v {
-                    return Ok(http_error(StatusCode::UNAUTHORIZED));
-                }
-            }
-            Err(e) => {
-                error!("{}", e.context("error verifying request"));
-                return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
-            }
-        }
-
-        if let Some(upstream) = self.inner.config.handlers.get(path) {
-            upstream.call(request).await
-        } else {
-            Ok(http_error(StatusCode::NOT_FOUND))
-        }
+    ) -> PinnedFuture<anyhow::Result<crate::FullResponse>> {
+        self.inner.service.call(request)
     }
 
     async fn handle_new_connection(
@@ -163,4 +143,32 @@ pub enum Source {
 
     #[default]
     Unknown,
+}
+
+pub struct RouterService {
+    config: Arc<Configuration>,
+}
+
+impl RouterService {
+    pub fn new(config: Arc<Configuration>) -> Self {
+        Self { config }
+    }
+}
+
+impl Service<crate::Request> for RouterService {
+    type Response = crate::FullResponse;
+    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
+    type Error = anyhow::Error;
+
+    fn call(&self, req: crate::Request) -> Self::Future {
+        let config = self.config.clone();
+        Box::pin(async move {
+            let path = path(&req);
+            if let Some(upstream) = config.handlers.get(path) {
+                upstream.call(req).await
+            } else {
+                Ok(http_error(StatusCode::NOT_FOUND))
+            }
+        })
+    }
 }

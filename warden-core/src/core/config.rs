@@ -2,12 +2,13 @@ use std::{
     collections::HashMap,
     io::ErrorKind,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use anyhow::Context;
 use http::StatusCode;
 use http_body_util::{BodyExt, Full};
-use hyper::body::Bytes;
+use hyper::{body::Bytes, service::Service};
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -15,7 +16,11 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
-use crate::{core::Source, up::http1::Http1Upstream, utils::http_error};
+use crate::{
+    core::Source,
+    up::{PinnedFuture, http1::Http1Upstream},
+    utils::http_error,
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,63 +73,74 @@ pub struct Location {
     pub permission: Permission,
 
     #[serde(skip)]
-    pub source: Source,
+    pub source: Arc<Source>,
 }
 
-impl Location {
-    pub async fn call(&self, request: crate::Request) -> anyhow::Result<crate::FullResponse> {
-        match &self.source {
-            Source::StaticHtml(d) => {
-                Ok(crate::FullResponse::new(Full::new(Bytes::from(d.clone()))))
-            }
-            Source::DynamicHtml(p) => {
-                let mut buf = Vec::new();
-                File::open(p)
-                    .await
-                    .with_context(|| "could not open dynamic page")?
-                    .read_to_end(&mut buf)
-                    .await
-                    .with_context(|| "could not read dynamic page")?;
+impl Service<crate::Request> for Location {
+    type Response = crate::FullResponse;
+    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
+    type Error = anyhow::Error;
+    fn call(&self, req: crate::Request) -> Self::Future {
+        let source = self.source.clone();
+        Box::pin(async move {
+            match &*source {
+                Source::StaticHtml(d) => {
+                    Ok(crate::FullResponse::new(Full::new(Bytes::from(d.clone()))))
+                }
+                Source::DynamicHtml(p) => {
+                    let mut buf = Vec::new();
+                    let mut file = match File::open(p)
+                        .await
+                        .with_context(|| "could not open dynamic page")
+                    {
+                        Ok(f) => f,
+                        Err(e) => return Err(e),
+                    };
 
-                Ok(crate::FullResponse::new(Full::new(Bytes::from(buf))))
-            }
-            Source::Http(uri, sender) => {
-                let host = match uri.host() {
-                    None => return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR)),
-                    Some(host) => host,
-                };
-                let request = match hyper::Request::builder()
-                    .header(http::header::HOST, host)
-                    .body(request.into_body())
-                {
-                    Ok(req) => req,
-                    Err(err) => {
-                        error!("error building downstream response: {err}");
-                        return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
-                    }
-                };
+                    file.read_to_end(&mut buf)
+                        .await
+                        .with_context(|| "could not read dynamic page")?;
 
-                // TODO: Find better way to share HTTP client
-                match sender.call(request).await {
-                    Ok(res) => {
-                        let (parts, body) = res.into_parts();
-                        let body = match body.collect().await {
-                            Ok(bytes) => bytes.to_bytes(),
-                            Err(err) => {
-                                error!("error collecting upstream response: {err}");
-                                return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
-                            }
-                        };
-                        Ok(crate::FullResponse::from_parts(parts, body.into()))
-                    }
-                    Err(err) => {
-                        error!("failed to get response from upstream: {err}");
-                        Ok(http_error(StatusCode::BAD_GATEWAY))
+                    Ok(crate::FullResponse::new(Full::new(Bytes::from(buf))))
+                }
+                Source::Http(uri, sender) => {
+                    let host = match uri.host() {
+                        None => return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR)),
+                        Some(host) => host,
+                    };
+                    let request = match hyper::Request::builder()
+                        .header(http::header::HOST, host)
+                        .body(req.into_body())
+                    {
+                        Ok(req) => req,
+                        Err(err) => {
+                            error!("error building downstream response: {err}");
+                            return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
+                        }
+                    };
+
+                    // TODO: Find better way to share HTTP client
+                    match sender.call(request).await {
+                        Ok(res) => {
+                            let (parts, body) = res.into_parts();
+                            let body = match body.collect().await {
+                                Ok(bytes) => bytes.to_bytes(),
+                                Err(err) => {
+                                    error!("error collecting upstream response: {err}");
+                                    return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
+                                }
+                            };
+                            Ok(crate::FullResponse::from_parts(parts, body.into()))
+                        }
+                        Err(err) => {
+                            error!("failed to get response from upstream: {err}");
+                            Ok(http_error(StatusCode::BAD_GATEWAY))
+                        }
                     }
                 }
+                _ => Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR)),
             }
-            _ => Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR)),
-        }
+        })
     }
 }
 
@@ -147,7 +163,7 @@ impl Configuration {
 
             handler.source = match protocol {
                 Protocol::Html => match cache {
-                    Cache::None => Source::DynamicHtml(path.into()),
+                    Cache::None => Arc::new(Source::DynamicHtml(path.into())),
                     Cache::Static => {
                         let mut buf = vec![];
                         let mut file = File::open(&path).await?;
@@ -164,7 +180,7 @@ impl Configuration {
                             ));
                         }
                         file.read_to_end(&mut buf).await?;
-                        Source::StaticHtml(buf)
+                        Arc::new(Source::StaticHtml(buf))
                     }
                 },
                 Protocol::Http => {
@@ -175,9 +191,9 @@ impl Configuration {
                     let up = Http1Upstream::connect(&url).await.map_err(|e| {
                         std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e)
                     })?;
-                    Source::Http(url, up)
+                    Arc::new(Source::Http(url, up))
                 }
-                Protocol::Https => Source::Https,
+                Protocol::Https => Arc::new(Source::Https),
             };
         }
 
