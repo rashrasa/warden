@@ -27,3 +27,4 @@ tokio = { version = "1.52.4", features = [
     "fs",
 ] }
 tokio-rustls = "0.26.4"
+tower = "0.5.3"

@@ -3,7 +3,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use log::error;
 
-pub fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> crate::Response {
+pub fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> crate::FullResponse {
     hyper::Response::builder()
         .status(status)
         .header(hyper::header::CONTENT_TYPE, mime_type)
@@ -11,7 +11,7 @@ pub fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> crat
         .unwrap()
 }
 
-pub fn string_response(status: StatusCode, body: &str, mime_type: &str) -> crate::Response {
+pub fn string_response(status: StatusCode, body: &str, mime_type: &str) -> crate::FullResponse {
     hyper::Response::builder()
         .status(status)
         .header(hyper::header::CONTENT_TYPE, mime_type)
@@ -19,11 +19,11 @@ pub fn string_response(status: StatusCode, body: &str, mime_type: &str) -> crate
         .unwrap()
 }
 
-pub fn html_response(status: StatusCode, html: &str) -> crate::Response {
+pub fn html_response(status: StatusCode, html: &str) -> crate::FullResponse {
     string_response(status, html, "text/html")
 }
 
-pub fn http_error(code: StatusCode) -> crate::Response {
+pub fn http_error(code: StatusCode) -> crate::FullResponse {
     html_response(
         code,
         &format!(
@@ -51,14 +51,14 @@ pub fn path(request: &crate::Request) -> &str {
 }
 
 pub trait WardenHttpExt<T> {
-    fn ok_or_500(self) -> Result<T, crate::Response>;
+    fn ok_or_500(self) -> Result<T, crate::FullResponse>;
 }
 
 impl<T, E> WardenHttpExt<T> for Result<T, E>
 where
     E: std::error::Error,
 {
-    fn ok_or_500(self) -> Result<T, crate::Response> {
+    fn ok_or_500(self) -> Result<T, crate::FullResponse> {
         match self {
             Ok(val) => Ok(val),
             Err(err) => {

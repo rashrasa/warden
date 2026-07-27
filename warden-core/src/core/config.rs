@@ -8,16 +8,14 @@ use anyhow::Context;
 use http::StatusCode;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
-use hyper_util::rt::TokioIo;
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs::{File, create_dir_all},
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
 };
 
-use crate::{core::Source, up::http1::make_http1_connection, utils::http_error};
+use crate::{core::Source, up::http1::Http1Upstream, utils::http_error};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,9 +72,11 @@ pub struct Location {
 }
 
 impl Location {
-    pub async fn call(&self, request: crate::Request) -> anyhow::Result<crate::Response> {
+    pub async fn call(&self, request: crate::Request) -> anyhow::Result<crate::FullResponse> {
         match &self.source {
-            Source::StaticHtml(d) => Ok(crate::Response::new(Full::new(Bytes::from(d.clone())))),
+            Source::StaticHtml(d) => {
+                Ok(crate::FullResponse::new(Full::new(Bytes::from(d.clone()))))
+            }
             Source::DynamicHtml(p) => {
                 let mut buf = Vec::new();
                 File::open(p)
@@ -86,7 +86,7 @@ impl Location {
                     .await
                     .with_context(|| "could not read dynamic page")?;
 
-                Ok(crate::Response::new(Full::new(Bytes::from(buf))))
+                Ok(crate::FullResponse::new(Full::new(Bytes::from(buf))))
             }
             Source::Http(uri, sender) => {
                 let host = match uri.host() {
@@ -105,7 +105,7 @@ impl Location {
                 };
 
                 // TODO: Find better way to share HTTP client
-                match sender.lock().await.send_request(request).await {
+                match sender.call(request).await {
                     Ok(res) => {
                         let (parts, body) = res.into_parts();
                         let body = match body.collect().await {
@@ -115,7 +115,7 @@ impl Location {
                                 return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
                             }
                         };
-                        Ok(crate::Response::from_parts(parts, body.into()))
+                        Ok(crate::FullResponse::from_parts(parts, body.into()))
                     }
                     Err(err) => {
                         error!("failed to get response from upstream: {err}");
@@ -171,24 +171,11 @@ impl Configuration {
                     let url = path
                         .parse::<hyper::Uri>()
                         .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e))?;
-                    let host = url.host().ok_or_else(|| {
-                        std::io::Error::new(
-                            ErrorKind::InvalidInput,
-                            anyhow::anyhow!("invalid uri {path}"),
-                        )
+
+                    let up = Http1Upstream::connect(&url).await.map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e)
                     })?;
-                    let address = format!("{host}:80");
-                    let stream = TcpStream::connect(address).await?;
-                    let io = TokioIo::new(stream);
-                    let (sender, conn) = make_http1_connection(io)
-                        .await
-                        .map_err(|e| std::io::Error::new(ErrorKind::ConnectionRefused, e))?;
-                    tokio::spawn(async move {
-                        if let Err(err) = conn.await {
-                            error!("connection failed: {err:?}");
-                        }
-                    });
-                    Source::Http(url, tokio::sync::Mutex::new(sender))
+                    Source::Http(url, up)
                 }
                 Protocol::Https => Source::Https,
             };

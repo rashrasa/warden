@@ -23,6 +23,7 @@ use tokio_rustls::TlsAcceptor;
 use crate::{
     auth::{AuthProvider, Authorization},
     core::config::Configuration,
+    up::http1::Http1Upstream,
     utils::{http_error, path},
 };
 
@@ -99,9 +100,9 @@ impl Warden {
     }
 
     async fn serve_request(
-        &self,
+        &mut self,
         request: hyper::Request<hyper::body::Incoming>,
-    ) -> anyhow::Result<crate::Response> {
+    ) -> anyhow::Result<crate::FullResponse> {
         let path = path(&request);
 
         let verified = self.inner.auth.verify_request(&request);
@@ -153,7 +154,7 @@ impl Warden {
                 .serve_connection(
                     io,
                     service_fn(move |r| {
-                        let warden = warden.clone();
+                        let mut warden = warden.clone();
                         async move { warden.serve_request(r).await }
                     }),
                 )
@@ -182,10 +183,7 @@ pub enum Source {
     /// Should not be used for high traffic routes since it's more computationally
     /// expensive.
     DynamicHtml(PathBuf),
-    Http(
-        Uri,
-        tokio::sync::Mutex<http1::SendRequest<hyper::body::Incoming>>,
-    ),
+    Http(Uri, Http1Upstream),
     Https,
 
     #[default]

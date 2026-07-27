@@ -2,8 +2,11 @@ use hyper::client::conn::http2::*;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use std::time::Duration;
 use tokio::net::TcpStream;
+use tower::Service;
 
-pub async fn make_http2_connection(
+use crate::up::PinnedFuture;
+
+async fn make_http2_connection(
     io: TokioIo<TcpStream>,
 ) -> Result<
     (
@@ -18,4 +21,31 @@ pub async fn make_http2_connection(
         .timer(TokioTimer::new())
         .handshake(io)
         .await
+}
+
+pub struct Http2Upstream {
+    inner: SendRequest<hyper::body::Incoming>,
+}
+
+impl Http2Upstream {
+    pub fn connect(uri: hyper::Uri) -> Self {
+        todo!()
+    }
+}
+
+impl Service<crate::Request> for Http2Upstream {
+    type Response = crate::IncomingResponse;
+    type Error = hyper::Error;
+    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
+
+    fn call(&mut self, req: crate::Request) -> Self::Future {
+        Box::pin(self.inner.send_request(req))
+    }
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
 }
