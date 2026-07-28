@@ -24,15 +24,15 @@ use crate::{
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub struct Configuration {
+pub struct ConfigurationDesc {
     #[serde(skip)]
     pub path: PathBuf,
-    pub handlers: HashMap<String, Location>,
+    pub handlers: HashMap<String, LocationDesc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum Protocol {
+pub enum ProtocolDesc {
     Html,
     Http,
     Https,
@@ -40,43 +40,43 @@ pub enum Protocol {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub struct Role {}
+pub struct RoleDesc {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum Filter {
+pub enum FilterDesc {
     Allow,
     Block,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub struct Permission {
+pub struct PermissionDesc {
     #[serde(rename = "type")]
-    pub filter: Filter,
+    pub filter: FilterDesc,
     pub roles: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum Cache {
+pub enum CacheDesc {
     None,
     Static,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub struct Location {
-    pub protocol: Protocol,
+pub struct LocationDesc {
+    pub protocol: ProtocolDesc,
     pub path: String,
-    pub cache: Cache,
-    pub permission: Permission,
+    pub cache: CacheDesc,
+    pub permission: PermissionDesc,
 
     #[serde(skip)]
     pub source: Arc<Source>,
 }
 
-impl Service<crate::Request> for Location {
+impl Service<crate::Request> for LocationDesc {
     type Response = crate::FullResponse;
     type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
     type Error = anyhow::Error;
@@ -145,7 +145,7 @@ impl Service<crate::Request> for Location {
     }
 }
 
-impl Configuration {
+impl ConfigurationDesc {
     /// Propogates std::io errors for handling. Serialization errors are represented
     /// as std::io::ErrorKind::InvalidData.
     pub async fn from_path(p: impl AsRef<Path>) -> std::io::Result<Self> {
@@ -163,9 +163,9 @@ impl Configuration {
             let path = handler.path.clone();
 
             handler.source = match protocol {
-                Protocol::Html => match cache {
-                    Cache::None => Arc::new(Source::DynamicHtml(path.into())),
-                    Cache::Static => {
+                ProtocolDesc::Html => match cache {
+                    CacheDesc::None => Arc::new(Source::DynamicHtml(path.into())),
+                    CacheDesc::Static => {
                         let mut buf = vec![];
                         let mut file = File::open(&path).await?;
 
@@ -184,7 +184,7 @@ impl Configuration {
                         Arc::new(Source::StaticHtml(buf))
                     }
                 },
-                Protocol::Http => {
+                ProtocolDesc::Http => {
                     let url = path
                         .parse::<hyper::Uri>()
                         .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e))?;
@@ -194,7 +194,7 @@ impl Configuration {
                     })?;
                     Arc::new(Source::Http(url, up))
                 }
-                Protocol::Https => Arc::new(Source::Https),
+                ProtocolDesc::Https => Arc::new(Source::Https),
             };
         }
 

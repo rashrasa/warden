@@ -22,7 +22,7 @@ use tokio_rustls::TlsAcceptor;
 
 use crate::{
     auth::AuthService,
-    core::config::Configuration,
+    core::config::ConfigurationDesc,
     down::Downstream,
     throttle::ThrottleService,
     up::{PinnedFuture, http1::Http1Upstream},
@@ -40,7 +40,7 @@ pub struct WardenInner {
     tls_acceptor: TlsAcceptor,
 
     service: ThrottleService<AuthService<RouterService>>,
-    config: Arc<Configuration>,
+    config: Arc<ConfigurationDesc>,
 }
 
 impl Warden {
@@ -70,7 +70,7 @@ impl Warden {
 
         info!("server started @ {}", host);
 
-        let config = Arc::new(Configuration::from_path_or_default(config_path).await);
+        let config = Arc::new(ConfigurationDesc::from_path_or_default(config_path).await);
 
         let service = ThrottleService::new(AuthService::new(
             Arc::clone(&config),
@@ -149,11 +149,11 @@ pub enum Source {
 }
 
 pub struct RouterService {
-    config: Arc<Configuration>,
+    config: Arc<ConfigurationDesc>,
 }
 
 impl RouterService {
-    pub fn new(config: Arc<Configuration>) -> Self {
+    pub fn new(config: Arc<ConfigurationDesc>) -> Self {
         Self { config }
     }
 }

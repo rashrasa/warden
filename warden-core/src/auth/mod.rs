@@ -5,7 +5,7 @@ use hyper::service::Service;
 use log::error;
 
 use crate::{
-    core::config::{Configuration, Filter},
+    core::config::{ConfigurationDesc, FilterDesc},
     up::PinnedFuture,
     utils::{http_error, path},
 };
@@ -15,11 +15,11 @@ const USER_HEADER: &str = "x-warden-user";
 #[derive(Debug)]
 pub struct AuthService<S> {
     inner: S,
-    config: Arc<Configuration>,
+    config: Arc<ConfigurationDesc>,
 }
 
 impl<S> AuthService<S> {
-    pub fn new(config: Arc<Configuration>, inner: S) -> Self {
+    pub fn new(config: Arc<ConfigurationDesc>, inner: S) -> Self {
         Self { inner, config }
     }
 }
@@ -77,7 +77,7 @@ where
 
         if let Some(h) = self.config.handlers.get(path) {
             match &h.permission.filter {
-                Filter::Allow => {
+                FilterDesc::Allow => {
                     if let Some(r) = self.parse_role(request) {
                         if h.permission.roles.contains(&r) {
                             return Ok(Authorization::Allowed);
@@ -86,7 +86,7 @@ where
                         }
                     }
                 }
-                Filter::Block => {
+                FilterDesc::Block => {
                     if let Some(r) = self.parse_role(request) {
                         if h.permission.roles.contains(&r) {
                             return Ok(Authorization::Blocked);
