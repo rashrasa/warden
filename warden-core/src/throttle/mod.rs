@@ -86,7 +86,8 @@ where
                 let retry_after = HeaderValue::from_str(&format!("{}", retry_after))
                     .unwrap_or(HeaderValue::from_static("1"));
 
-                headers.insert(hyper::header::RETRY_AFTER, retry_after);
+                headers.insert(hyper::header::RETRY_AFTER, retry_after.clone());
+                headers.insert(hyper::header::REFRESH, retry_after);
 
                 Ok(http_error_with_headers(
                     StatusCode::TOO_MANY_REQUESTS,
