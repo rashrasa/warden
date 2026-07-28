@@ -6,7 +6,7 @@ use tokio::{sync::Mutex, time::Instant};
 
 use crate::{up::PinnedFuture, utils::http_error_with_headers};
 
-const MAX_REQUESTS_PER_SECOND: u64 = 50;
+const MAX_REQUESTS_PER_SECOND: u64 = 5;
 const WINDOW: Duration = Duration::new(1, 0);
 
 #[derive(Debug)]
@@ -74,6 +74,7 @@ where
                 meta.last = Instant::now();
                 meta.window_requests -=
                     MAX_REQUESTS_PER_SECOND as f64 * (elapsed / WINDOW.as_secs_f64());
+                meta.window_requests = meta.window_requests.max(0.0);
             }
 
             if meta.window_requests > MAX_REQUESTS_PER_SECOND as f64 {
