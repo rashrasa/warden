@@ -1,4 +1,4 @@
-use http::StatusCode;
+use http::{HeaderMap, StatusCode};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use log::error;
@@ -23,8 +23,11 @@ pub fn html_response(status: StatusCode, html: &str) -> crate::FullResponse {
     string_response(status, html, "text/html")
 }
 
-pub fn http_error(code: StatusCode) -> crate::FullResponse {
-    html_response(
+pub fn http_error_with_headers(
+    code: StatusCode,
+    additional_headers: HeaderMap,
+) -> crate::FullResponse {
+    let mut response = html_response(
         code,
         &format!(
             "
@@ -37,7 +40,21 @@ pub fn http_error(code: StatusCode) -> crate::FullResponse {
             ",
             env!("CARGO_PKG_VERSION")
         ),
-    )
+    );
+
+    let headers = response.headers_mut();
+
+    for (name, value) in additional_headers.into_iter() {
+        if let Some(name) = name {
+            headers.insert(name, value);
+        }
+    }
+
+    response
+}
+
+pub fn http_error(code: StatusCode) -> crate::FullResponse {
+    http_error_with_headers(code, HeaderMap::new())
 }
 
 pub fn path(request: &crate::Request) -> &str {

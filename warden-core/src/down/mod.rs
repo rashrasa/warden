@@ -1,16 +1,17 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::Context;
-use http::StatusCode;
+use http::{HeaderMap, HeaderValue, StatusCode};
 use hyper::server::conn::http2;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{error, trace};
 use tokio::{net::TcpStream, sync::Mutex, time::Instant};
 use tokio_rustls::TlsAcceptor;
 
-use crate::{Warden, up::PinnedFuture, utils::http_error};
+use crate::{Warden, up::PinnedFuture, utils::http_error_with_headers};
 
-const MAX_REQUESTS_PER_SECOND: u64 = 1;
+const MAX_REQUESTS_PER_SECOND: u64 = 50;
+
 const WINDOW: Duration = Duration::new(1, 0);
 
 #[derive(Debug, Clone)]
@@ -22,7 +23,7 @@ pub struct Downstream {
 struct DownstreamInner {
     warden: Warden,
     last: Instant,
-    window_requests: u64,
+    window_requests: f64,
 }
 
 impl hyper::service::Service<crate::Request> for Downstream {
@@ -34,16 +35,30 @@ impl hyper::service::Service<crate::Request> for Downstream {
         let cloned = self.clone();
         Box::pin(async move {
             let mut inner = cloned.inner.lock().await;
-            if inner.last.elapsed() > WINDOW {
+            inner.window_requests += 1.0;
+            let elapsed = inner.last.elapsed().as_secs_f64();
+
+            if elapsed > WINDOW.as_secs_f64() {
                 inner.last = Instant::now();
-                inner.window_requests = 0;
+                inner.window_requests -=
+                    MAX_REQUESTS_PER_SECOND as f64 * (elapsed / WINDOW.as_secs_f64());
             }
 
-            if inner.window_requests > MAX_REQUESTS_PER_SECOND {
-                Ok(http_error(StatusCode::TOO_MANY_REQUESTS))
-            } else {
-                inner.window_requests += 1;
+            if inner.window_requests > MAX_REQUESTS_PER_SECOND as f64 {
+                let mut headers = HeaderMap::with_capacity(1);
 
+                let retry_after = (((inner.window_requests as f64 / MAX_REQUESTS_PER_SECOND as f64)
+                    * WINDOW.as_secs_f64()) as i64)
+                    .max(1);
+                let retry_after = HeaderValue::from_str(&format!("{}", retry_after))
+                    .unwrap_or(HeaderValue::from_static("1"));
+
+                headers.insert(hyper::header::RETRY_AFTER, retry_after);
+                Ok(http_error_with_headers(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    headers,
+                ))
+            } else {
                 inner.warden.serve_request(req).await
             }
         })
@@ -62,7 +77,7 @@ impl Downstream {
             inner: Arc::new(Mutex::new(DownstreamInner {
                 warden,
                 last: Instant::now(),
-                window_requests: 0,
+                window_requests: 0.0,
             })),
         };
         let downstream_task = downstream.clone();
