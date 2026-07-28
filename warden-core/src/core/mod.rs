@@ -21,7 +21,7 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
-    auth::{AuthService, Authorization},
+    auth::AuthService,
     core::config::Configuration,
     down::Downstream,
     up::{PinnedFuture, http1::Http1Upstream},
