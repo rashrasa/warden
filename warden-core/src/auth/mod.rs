@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use http::StatusCode;
-use hyper::{Request, body::Incoming, service::Service};
+use hyper::service::Service;
 use log::error;
 
 use crate::{
@@ -65,14 +65,14 @@ impl<S> AuthService<S>
 where
     S: Service<crate::Request>,
 {
-    pub fn parse_role(&self, request: &Request<Incoming>) -> Option<String> {
-        match request.headers().get(USER_HEADER) {
+    pub fn parse_role(&self, request: &crate::Request) -> Option<String> {
+        match request.inner.headers().get(USER_HEADER) {
             Some(v) => String::from_utf8(v.as_bytes().to_vec()).ok(),
             None => None,
         }
     }
 
-    pub fn verify_request(&self, request: &Request<Incoming>) -> anyhow::Result<Authorization> {
+    pub fn verify_request(&self, request: &crate::Request) -> anyhow::Result<Authorization> {
         let path = path(request);
 
         if let Some(h) = self.config.handlers.get(path) {

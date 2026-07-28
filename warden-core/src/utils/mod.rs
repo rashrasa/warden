@@ -58,7 +58,7 @@ pub fn http_error(code: StatusCode) -> crate::FullResponse {
 }
 
 pub fn path(request: &crate::Request) -> &str {
-    let mut path = request.uri().path();
+    let mut path = request.inner.uri().path();
     if path.len() > 1
         && let Some(p) = path.strip_suffix("/")
     {

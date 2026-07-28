@@ -80,7 +80,7 @@ impl Service<crate::Request> for Location {
     type Response = crate::FullResponse;
     type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
     type Error = anyhow::Error;
-    fn call(&self, req: crate::Request) -> Self::Future {
+    fn call(&self, mut req: crate::Request) -> Self::Future {
         let source = self.source.clone();
         Box::pin(async move {
             match &*source {
@@ -110,7 +110,7 @@ impl Service<crate::Request> for Location {
                     };
                     let request = match hyper::Request::builder()
                         .header(http::header::HOST, host)
-                        .body(req.into_body())
+                        .body(req.inner.into_body())
                     {
                         Ok(req) => req,
                         Err(err) => {
@@ -118,9 +118,10 @@ impl Service<crate::Request> for Location {
                             return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
                         }
                     };
+                    req.inner = request;
 
                     // TODO: Find better way to share HTTP client
-                    match sender.call(request).await {
+                    match sender.call(req).await {
                         Ok(res) => {
                             let (parts, body) = res.into_parts();
                             let body = match body.collect().await {

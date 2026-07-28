@@ -63,7 +63,7 @@ impl Service<crate::Request> for Http1UpstreamInner {
     type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
 
     fn call(&mut self, req: crate::Request) -> Self::Future {
-        Box::pin(self.sender.send_request(req))
+        Box::pin(self.sender.send_request(req.inner))
     }
 
     fn poll_ready(

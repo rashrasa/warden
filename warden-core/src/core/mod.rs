@@ -24,6 +24,7 @@ use crate::{
     auth::AuthService,
     core::config::Configuration,
     down::Downstream,
+    throttle::ThrottleService,
     up::{PinnedFuture, http1::Http1Upstream},
     utils::{http_error, path},
 };
@@ -38,7 +39,7 @@ pub struct WardenInner {
     listener: TcpListener,
     tls_acceptor: TlsAcceptor,
 
-    service: AuthService<RouterService>,
+    service: ThrottleService<AuthService<RouterService>>,
     config: Arc<Configuration>,
 }
 
@@ -71,8 +72,10 @@ impl Warden {
 
         let config = Arc::new(Configuration::from_path_or_default(config_path).await);
 
-        let service =
-            AuthService::new(Arc::clone(&config), RouterService::new(Arc::clone(&config)));
+        let service = ThrottleService::new(AuthService::new(
+            Arc::clone(&config),
+            RouterService::new(Arc::clone(&config)),
+        ));
         Ok(Self {
             inner: Arc::new(WardenInner {
                 tls_acceptor,
@@ -100,8 +103,8 @@ impl Warden {
     }
 
     pub fn serve_request(
-        &mut self,
-        request: hyper::Request<hyper::body::Incoming>,
+        &self,
+        request: crate::Request,
     ) -> PinnedFuture<anyhow::Result<crate::FullResponse>> {
         self.inner.service.call(request)
     }
