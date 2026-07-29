@@ -18,6 +18,15 @@ pub struct AuthService<S> {
     config: Arc<ConfigurationDesc>,
 }
 
+impl<S: Clone> Clone for AuthService<S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            config: Arc::clone(&self.config),
+        }
+    }
+}
+
 impl<S> AuthService<S> {
     pub fn new(config: Arc<ConfigurationDesc>, inner: S) -> Self {
         Self { inner, config }

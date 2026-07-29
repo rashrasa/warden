@@ -158,6 +158,14 @@ impl RouterService {
     }
 }
 
+impl Clone for RouterService {
+    fn clone(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+        }
+    }
+}
+
 impl Service<crate::Request> for RouterService {
     type Response = crate::FullResponse;
     type Future = PinnedFuture<Result<Self::Response, Self::Error>>;

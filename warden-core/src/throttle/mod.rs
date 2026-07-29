@@ -16,20 +16,21 @@ const WINDOW: Duration = Duration::new(1, 0);
 
 #[derive(Debug)]
 pub struct ThrottleService<S> {
-    inner: Arc<ThrottleServiceInner<S>>,
+    inner: S,
+    state: Arc<ThrottleServiceInner>,
 }
 
-impl<S> Clone for ThrottleService<S> {
+impl<S: Clone> Clone for ThrottleService<S> {
     fn clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
+            inner: self.inner.clone(),
+            state: Arc::clone(&self.state),
         }
     }
 }
 
 #[derive(Debug)]
-struct ThrottleServiceInner<S> {
-    inner: S,
+struct ThrottleServiceInner {
     clients: Mutex<HashMap<SocketAddr, Metadata>>,
 }
 
@@ -41,11 +42,10 @@ struct Metadata {
 
 impl<S> ThrottleService<S> {
     pub fn new(inner: S) -> Self {
-        let inner = Arc::new(ThrottleServiceInner {
-            inner,
+        let state = Arc::new(ThrottleServiceInner {
             clients: Mutex::new(HashMap::new()),
         });
-        Self { inner }
+        Self { inner, state }
     }
 }
 
@@ -56,9 +56,11 @@ where
             Response = crate::FullResponse,
             Error = anyhow::Error,
             Future = PinnedFuture<Result<crate::FullResponse, anyhow::Error>>,
-        > + Send
+        >
+        + Send
         + Sync
-        + 'static,
+        + 'static
+        + Clone,
 {
     type Response = crate::FullResponse;
     type Error = anyhow::Error;
@@ -69,7 +71,7 @@ where
         Box::pin(async move {
             let window_requests;
             {
-                let mut map = cloned.inner.clients.lock().unwrap_log();
+                let mut map = cloned.state.clients.lock().unwrap_log();
                 let meta = map.entry(req.source).or_insert(Metadata {
                     last: Instant::now(),
                     window_requests: 0.0,
@@ -103,7 +105,7 @@ where
                     headers,
                 ))
             } else {
-                cloned.inner.inner.call(req).await
+                cloned.inner.clone().call(req).await
             }
         })
     }
