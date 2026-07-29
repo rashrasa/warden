@@ -6,7 +6,7 @@ use log::error;
 use tokio::{net::TcpStream, sync::Mutex};
 use tower::Service;
 
-use crate::up::PinnedFuture;
+use crate::PinnedFuture;
 
 async fn make_http1_connection(
     io: TokioIo<TcpStream>,

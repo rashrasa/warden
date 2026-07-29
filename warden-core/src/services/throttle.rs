@@ -9,7 +9,7 @@ use http::{HeaderMap, HeaderValue, StatusCode};
 use hyper::service::Service;
 use tokio::time::Instant;
 
-use crate::{UnwrapLog, up::PinnedFuture, utils::http_error_with_headers};
+use crate::{PinnedFuture, UnwrapLog, utils::http_error_with_headers};
 
 const MAX_REQUESTS_PER_SECOND: u64 = 5;
 const WINDOW: Duration = Duration::new(1, 0);

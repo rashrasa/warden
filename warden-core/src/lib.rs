@@ -1,15 +1,16 @@
-mod auth;
 pub mod core;
 pub mod down;
-pub mod throttle;
+pub mod services;
 pub mod up;
 pub mod utils;
 
 pub use core::Warden;
-use std::{net::SocketAddr, sync::PoisonError};
+use std::{net::SocketAddr, pin::Pin, sync::PoisonError};
 
 use hyper::body::Incoming;
 use log::error;
+
+pub type PinnedFuture<T> = Pin<Box<dyn Future<Output = T> + 'static + Send>>;
 
 pub const MAX_STATIC_HTML_FILE_SIZE: u64 = 1024 * 1024;
 

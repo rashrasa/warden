@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tower::Service;
 
-use crate::up::PinnedFuture;
+use crate::PinnedFuture;
 
 async fn make_http2_connection(
     io: TokioIo<TcpStream>,

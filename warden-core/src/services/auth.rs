@@ -5,8 +5,8 @@ use hyper::service::Service;
 use log::error;
 
 use crate::{
+    PinnedFuture,
     core::config::{ConfigurationDesc, FilterDesc},
-    up::PinnedFuture,
     utils::{http_error, path},
 };
 

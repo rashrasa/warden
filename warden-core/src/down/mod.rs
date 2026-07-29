@@ -10,7 +10,7 @@ use log::{error, trace};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
 
-use crate::{Warden, up::PinnedFuture};
+use crate::{PinnedFuture, Warden};
 
 #[derive(Debug, Clone)]
 pub struct Downstream {

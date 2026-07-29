@@ -2,7 +2,7 @@ pub mod config;
 pub mod route;
 
 use anyhow::Context;
-use http::{StatusCode, Uri};
+use http::Uri;
 use hyper::service::Service;
 use log::{error, info};
 use rustls::{
@@ -21,12 +21,11 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
-    auth::AuthService,
+    PinnedFuture,
     core::config::ConfigurationDesc,
     down::Downstream,
-    throttle::ThrottleService,
-    up::{PinnedFuture, http1::Http1Upstream},
-    utils::{http_error, path},
+    services::{AuthService, RouterService, ThrottleService},
+    up::http1::Http1Upstream,
 };
 
 #[derive(Clone, Debug)]
@@ -146,40 +145,4 @@ pub enum Source {
 
     #[default]
     Unknown,
-}
-
-pub struct RouterService {
-    config: Arc<ConfigurationDesc>,
-}
-
-impl RouterService {
-    pub fn new(config: Arc<ConfigurationDesc>) -> Self {
-        Self { config }
-    }
-}
-
-impl Clone for RouterService {
-    fn clone(&self) -> Self {
-        Self {
-            config: Arc::clone(&self.config),
-        }
-    }
-}
-
-impl Service<crate::Request> for RouterService {
-    type Response = crate::FullResponse;
-    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
-    type Error = anyhow::Error;
-
-    fn call(&self, req: crate::Request) -> Self::Future {
-        let config = self.config.clone();
-        Box::pin(async move {
-            let path = path(&req);
-            if let Some(upstream) = config.handlers.get(path) {
-                upstream.call(req).await
-            } else {
-                Ok(http_error(StatusCode::NOT_FOUND))
-            }
-        })
-    }
 }

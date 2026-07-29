@@ -1,7 +1,6 @@
 use http::{HeaderMap, StatusCode};
 use http_body_util::Full;
 use hyper::body::Bytes;
-use log::error;
 
 pub fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> crate::FullResponse {
     hyper::Response::builder()
@@ -66,24 +65,4 @@ pub fn path(request: &crate::Request) -> &str {
     }
 
     path
-}
-
-pub trait WardenHttpExt<T> {
-    fn ok_or_500(self) -> Result<T, crate::FullResponse>;
-}
-
-impl<T, E> WardenHttpExt<T> for Result<T, E>
-where
-    E: std::error::Error,
-{
-    fn ok_or_500(self) -> Result<T, crate::FullResponse> {
-        match self {
-            Ok(val) => Ok(val),
-            Err(err) => {
-                error!("{err:?}");
-
-                Err(http_error(StatusCode::INTERNAL_SERVER_ERROR))
-            }
-        }
-    }
 }

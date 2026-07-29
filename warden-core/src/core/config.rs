@@ -16,11 +16,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
-use crate::{
-    core::Source,
-    up::{PinnedFuture, http1::Http1Upstream},
-    utils::http_error,
-};
+use crate::{PinnedFuture, core::Source, up::http1::Http1Upstream, utils::http_error};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
