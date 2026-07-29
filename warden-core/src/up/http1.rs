@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use hyper::client::conn::http1::*;
+use hyper::{client::conn::http1::*, service::Service};
 use hyper_util::rt::TokioIo;
 use log::error;
 use tokio::{net::TcpStream, sync::Mutex};
-use tower::Service;
 
 use crate::PinnedFuture;
 
@@ -57,39 +56,21 @@ struct Http1UpstreamInner {
     sender: SendRequest<hyper::body::Incoming>,
 }
 
-impl Service<crate::Request> for Http1UpstreamInner {
+impl Service<crate::Request> for Http1Upstream {
     type Response = crate::IncomingResponse;
     type Error = hyper::Error;
     type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
 
-    fn call(&mut self, req: crate::Request) -> Self::Future {
-        Box::pin(self.sender.send_request(req.inner))
-    }
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-}
-
-impl Http1Upstream {
-    pub fn call(
-        &self,
-        req: crate::Request,
-    ) -> PinnedFuture<Result<crate::IncomingResponse, hyper::Error>> {
-        let inner = self.inner.clone();
+    fn call(&self, req: crate::Request) -> Self::Future {
+        let cloned = self.clone();
         Box::pin(async move {
-            let mut guard = inner.lock().await;
-            guard.call(req).await
+            cloned
+                .inner
+                .lock()
+                .await
+                .sender
+                .send_request(req.inner)
+                .await
         })
-    }
-
-    fn poll_ready(
-        &self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), hyper::Error>> {
-        std::task::Poll::Ready(Ok(()))
     }
 }
