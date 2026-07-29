@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let warden = Warden::bind(
-        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 443)),
+        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 168, 2, 30), 443)),
         "./temp/config.json",
     )
     .await?;
