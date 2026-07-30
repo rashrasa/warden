@@ -3,12 +3,12 @@
     storing routes and matching paths against them and current APIs will be replaced.
 */
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Route {
     parts: Vec<RoutePart>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 enum RoutePart {
     Wildcard,
     Part(String),

@@ -2,21 +2,18 @@ use std::{
     collections::HashMap,
     io::ErrorKind,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
-use anyhow::Context;
-use http::StatusCode;
-use http_body_util::{BodyExt, Full};
-use hyper::{body::Bytes, service::Service};
-use log::error;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs::{File, create_dir_all},
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
-use crate::{PinnedFuture, core::Source, up::http1::Http1Upstream, utils::http_error};
+use crate::{
+    core::{Source, SourceInner},
+    up::http1::Http1Upstream,
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,76 +66,7 @@ pub struct LocationDesc {
     pub permission: PermissionDesc,
 
     #[serde(skip)]
-    pub source: Arc<Source>,
-}
-
-impl Service<crate::Request> for LocationDesc {
-    type Response = crate::FullResponse;
-    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
-    type Error = anyhow::Error;
-    fn call(&self, mut req: crate::Request) -> Self::Future {
-        let source = self.source.clone();
-        Box::pin(async move {
-            match &*source {
-                Source::StaticHtml(d) => {
-                    Ok(crate::FullResponse::new(Full::new(Bytes::from(d.clone()))))
-                }
-                Source::DynamicHtml(p) => {
-                    let mut buf = Vec::new();
-                    let mut file = match File::open(p)
-                        .await
-                        .with_context(|| "could not open dynamic page")
-                    {
-                        Ok(f) => f,
-                        Err(e) => return Err(e),
-                    };
-
-                    file.read_to_end(&mut buf)
-                        .await
-                        .with_context(|| "could not read dynamic page")?;
-
-                    Ok(crate::FullResponse::new(Full::new(Bytes::from(buf))))
-                }
-                Source::Http(uri, sender) => {
-                    let host = match uri.host() {
-                        None => return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR)),
-                        Some(host) => host,
-                    };
-                    let request = match hyper::Request::builder()
-                        .header(http::header::HOST, host)
-                        .body(req.inner.into_body())
-                    {
-                        Ok(req) => req,
-                        Err(err) => {
-                            error!("error building downstream response: {err}");
-                            return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
-                        }
-                    };
-                    req.inner = request;
-
-                    // TODO: Find better way to share HTTP client
-                    match sender.call(req).await {
-                        Ok(res) => {
-                            let (parts, body) = res.into_parts();
-                            let body = match body.collect().await {
-                                Ok(bytes) => bytes.to_bytes(),
-                                Err(err) => {
-                                    error!("error collecting upstream response: {err}");
-                                    return Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR));
-                                }
-                            };
-                            Ok(crate::FullResponse::from_parts(parts, body.into()))
-                        }
-                        Err(err) => {
-                            error!("failed to get response from upstream: {err}");
-                            Ok(http_error(StatusCode::BAD_GATEWAY))
-                        }
-                    }
-                }
-                _ => Ok(http_error(StatusCode::INTERNAL_SERVER_ERROR)),
-            }
-        })
-    }
+    pub source: Source,
 }
 
 impl ConfigurationDesc {
@@ -160,7 +88,7 @@ impl ConfigurationDesc {
 
             handler.source = match protocol {
                 ProtocolDesc::Html => match cache {
-                    CacheDesc::None => Arc::new(Source::DynamicHtml(path.into())),
+                    CacheDesc::None => Source::new(SourceInner::DynamicHtml(path.into())),
                     CacheDesc::Static => {
                         let mut buf = vec![];
                         let mut file = File::open(&path).await?;
@@ -177,7 +105,7 @@ impl ConfigurationDesc {
                             ));
                         }
                         file.read_to_end(&mut buf).await?;
-                        Arc::new(Source::StaticHtml(buf))
+                        Source::new(SourceInner::StaticHtml(buf))
                     }
                 },
                 ProtocolDesc::Http => {
@@ -188,9 +116,9 @@ impl ConfigurationDesc {
                     let up = Http1Upstream::connect(&url).await.map_err(|e| {
                         std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e)
                     })?;
-                    Arc::new(Source::Http(url, up))
+                    Source::new(SourceInner::Http(url, up))
                 }
-                ProtocolDesc::Https => Arc::new(Source::Https),
+                ProtocolDesc::Https => Source::new(SourceInner::Https),
             };
         }
 

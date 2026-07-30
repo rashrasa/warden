@@ -2,9 +2,10 @@ pub mod config;
 pub mod route;
 
 use anyhow::Context;
-use http::Uri;
-use hyper::service::Service;
-use log::info;
+use http::{StatusCode, Uri};
+use http_body_util::{BodyExt, Full};
+use hyper::{body::Bytes, service::Service};
+use log::{error, info};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
@@ -14,7 +15,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::net::TcpListener;
+use tokio::{fs::File, io::AsyncReadExt, net::TcpListener};
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
@@ -23,6 +24,7 @@ use crate::{
     down::ConnectionService,
     services::{AuthService, RouterService, ThrottleService},
     up::http1::Http1Upstream,
+    utils,
 };
 
 pub struct Warden {
@@ -63,7 +65,12 @@ impl Warden {
 
         let config = Arc::new(ConfigurationDesc::from_path_or_default(config_path).await);
 
-        let request_service = RequestService::new(&config);
+        let (request_service, errors) = RequestService::new(&config);
+
+        if !errors.is_empty() {
+            error!("route parsing failed for some routes\n{errors:?}");
+        }
+
         let connection_service =
             ConnectionService::new(listener, tls_acceptor, request_service.clone());
 
@@ -95,13 +102,14 @@ pub struct RequestService {
 }
 
 impl RequestService {
-    pub fn new(config: &Arc<ConfigurationDesc>) -> Self {
-        Self {
-            inner: ThrottleService::new(AuthService::new(
-                Arc::clone(config),
-                RouterService::new(Arc::clone(config)),
-            )),
-        }
+    pub fn new(config: &Arc<ConfigurationDesc>) -> (Self, Vec<anyhow::Error>) {
+        let (router, errors) = RouterService::new(Arc::clone(config));
+        (
+            Self {
+                inner: ThrottleService::new(AuthService::new(Arc::clone(config), router)),
+            },
+            errors,
+        )
     }
 }
 
@@ -116,7 +124,99 @@ impl Service<crate::Request> for RequestService {
 }
 
 #[derive(Debug, Default)]
-pub enum Source {
+pub struct Source {
+    inner: Arc<SourceInner>,
+}
+
+impl Source {
+    pub fn new(inner: SourceInner) -> Self {
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+}
+
+impl Clone for Source {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl Service<crate::Request> for Source {
+    type Response = crate::FullResponse;
+    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
+    type Error = anyhow::Error;
+    fn call(&self, mut req: crate::Request) -> Self::Future {
+        let source = self.clone();
+        Box::pin(async move {
+            match &*source.inner {
+                SourceInner::StaticHtml(d) => {
+                    Ok(crate::FullResponse::new(Full::new(Bytes::from(d.clone()))))
+                }
+                SourceInner::DynamicHtml(p) => {
+                    let mut buf = Vec::new();
+                    let mut file = match File::open(p)
+                        .await
+                        .with_context(|| "could not open dynamic page")
+                    {
+                        Ok(f) => f,
+                        Err(e) => return Err(e),
+                    };
+
+                    file.read_to_end(&mut buf)
+                        .await
+                        .with_context(|| "could not read dynamic page")?;
+
+                    Ok(crate::FullResponse::new(Full::new(Bytes::from(buf))))
+                }
+                SourceInner::Http(uri, sender) => {
+                    let host = match uri.host() {
+                        None => return Ok(utils::http_error(StatusCode::INTERNAL_SERVER_ERROR)),
+                        Some(host) => host,
+                    };
+                    let request = match hyper::Request::builder()
+                        .header(http::header::HOST, host)
+                        .body(req.inner.into_body())
+                    {
+                        Ok(req) => req,
+                        Err(err) => {
+                            error!("error building downstream response: {err}");
+                            return Ok(utils::http_error(StatusCode::INTERNAL_SERVER_ERROR));
+                        }
+                    };
+                    req.inner = request;
+
+                    // TODO: Find better way to share HTTP client
+                    match sender.call(req).await {
+                        Ok(res) => {
+                            let (parts, body) = res.into_parts();
+                            let body = match body.collect().await {
+                                Ok(bytes) => bytes.to_bytes(),
+                                Err(err) => {
+                                    error!("error collecting upstream response: {err}");
+                                    return Ok(utils::http_error(
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    ));
+                                }
+                            };
+                            Ok(crate::FullResponse::from_parts(parts, body.into()))
+                        }
+                        Err(err) => {
+                            error!("failed to get response from upstream: {err}");
+                            Ok(utils::http_error(StatusCode::BAD_GATEWAY))
+                        }
+                    }
+                }
+                _ => Ok(utils::http_error(StatusCode::INTERNAL_SERVER_ERROR)),
+            }
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub enum SourceInner {
     StaticHtml(Vec<u8>),
 
     /// This type reads the HTML file each time the page is requested.
