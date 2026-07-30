@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
         .filter_level(LevelFilter::Info)
         .init();
 
-    let warden = Warden::bind(
+    let mut warden = Warden::bind(
         SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 443)),
         "./temp/config.json",
     )

@@ -4,7 +4,7 @@ pub mod route;
 use anyhow::Context;
 use http::Uri;
 use hyper::service::Service;
-use log::{error, info};
+use log::info;
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
@@ -14,31 +14,23 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::{
-    net::{TcpListener, TcpStream},
-    select,
-};
+use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
     PinnedFuture,
     core::config::ConfigurationDesc,
-    down::Downstream,
+    down::ConnectionService,
     services::{AuthService, RouterService, ThrottleService},
     up::http1::Http1Upstream,
 };
 
-#[derive(Clone, Debug)]
 pub struct Warden {
-    inner: Arc<WardenInner>,
-}
-
-pub struct WardenInner {
     host: SocketAddr,
-    listener: TcpListener,
-    tls_acceptor: TlsAcceptor,
 
-    service: ThrottleService<AuthService<RouterService>>,
+    request_service: RequestService,
+    connection_service: ConnectionService,
+
     config: Arc<ConfigurationDesc>,
 }
 
@@ -71,64 +63,55 @@ impl Warden {
 
         let config = Arc::new(ConfigurationDesc::from_path_or_default(config_path).await);
 
-        let service = ThrottleService::new(AuthService::new(
-            Arc::clone(&config),
-            RouterService::new(Arc::clone(&config)),
-        ));
+        let request_service = RequestService::new(&config);
+        let connection_service =
+            ConnectionService::new(listener, tls_acceptor, request_service.clone());
+
         Ok(Self {
-            inner: Arc::new(WardenInner {
-                tls_acceptor,
-                host,
-                listener,
-                service,
-                config,
-            }),
+            host,
+            connection_service,
+            request_service,
+
+            config,
         })
     }
 
-    pub async fn serve_next(&self) -> anyhow::Result<()> {
-        select! {
-            conn = self.inner.listener.accept() => {
-                if let Err(e) = self.handle_new_connection(conn).await {
-                    error!("{}", e.context("failed to handle new connection"));
-                }
-                Ok(())
-            }
-        }
-    }
-
     pub fn host(&self) -> &SocketAddr {
-        &self.inner.host
+        &self.host
     }
 
-    pub fn serve_request(
-        &self,
-        request: crate::Request,
-    ) -> PinnedFuture<anyhow::Result<crate::FullResponse>> {
-        self.inner.service.call(request)
-    }
-
-    async fn handle_new_connection(
-        &self,
-        conn: std::io::Result<(TcpStream, SocketAddr)>,
-    ) -> anyhow::Result<()> {
-        Downstream::handle_new_connection(self.clone(), self.inner.tls_acceptor.clone(), conn)
-            .await?;
-        Ok(())
+    pub async fn serve_next(&mut self) -> anyhow::Result<()> {
+        self.connection_service.serve_next_connection().await
     }
 
     pub async fn close(&self) -> anyhow::Result<()> {
-        Ok(self.inner.config.save_if_missing().await?)
+        Ok(self.config.save_if_missing().await?)
     }
 }
 
-impl std::fmt::Debug for WardenInner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
-            f,
-            "Address: {:?}\nConfiguration:{:?}",
-            self.host, self.config
-        )
+#[derive(Clone)]
+pub struct RequestService {
+    inner: ThrottleService<AuthService<RouterService>>,
+}
+
+impl RequestService {
+    pub fn new(config: &Arc<ConfigurationDesc>) -> Self {
+        Self {
+            inner: ThrottleService::new(AuthService::new(
+                Arc::clone(config),
+                RouterService::new(Arc::clone(config)),
+            )),
+        }
+    }
+}
+
+impl Service<crate::Request> for RequestService {
+    type Response = crate::FullResponse;
+    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
+    type Error = anyhow::Error;
+
+    fn call(&self, req: crate::Request) -> Self::Future {
+        self.inner.call(req)
     }
 }
 

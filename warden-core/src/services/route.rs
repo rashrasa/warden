@@ -9,6 +9,7 @@ use crate::{
     utils::{http_error, path},
 };
 
+#[derive(Debug)]
 pub struct RouterService {
     config: Arc<ConfigurationDesc>,
 }
