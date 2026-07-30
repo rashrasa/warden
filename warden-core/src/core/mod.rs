@@ -2,7 +2,7 @@ pub mod config;
 pub mod route;
 
 use anyhow::Context;
-use http::{StatusCode, Uri};
+use http::{StatusCode, Uri, uri::PathAndQuery};
 use http_body_util::{BodyExt, Full};
 use hyper::{body::Bytes, service::Service};
 use log::{error, info};
@@ -13,6 +13,7 @@ use rustls::{
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
 };
 use tokio::{fs::File, io::AsyncReadExt, net::TcpListener};
@@ -176,8 +177,12 @@ impl Service<crate::Request> for Source {
                         None => return Ok(utils::http_error(StatusCode::INTERNAL_SERVER_ERROR)),
                         Some(host) => host,
                     };
+
+                    let uri = extend_path(uri, &req.path_extension)?;
+
                     let request = match hyper::Request::builder()
                         .header(http::header::HOST, host)
+                        .uri(uri)
                         .body(req.inner.into_body())
                     {
                         Ok(req) => req,
@@ -228,4 +233,24 @@ pub enum SourceInner {
 
     #[default]
     Unknown,
+}
+
+fn extend_path(uri: &Uri, ext: &str) -> anyhow::Result<Uri> {
+    let mut extended = String::new();
+
+    let path = uri.path().trim_end_matches("/").trim_start_matches("/");
+    let path_extension = (ext).trim_end_matches("/").trim_start_matches("/");
+
+    extended += &format!("{path}/{path_extension}");
+
+    if let Some(query) = uri.query() {
+        extended += &format!("?{query}");
+    }
+
+    let p_q = PathAndQuery::from_str(&extended).with_context(|| "failed to build extended path")?;
+
+    Uri::builder()
+        .path_and_query(p_q)
+        .build()
+        .with_context(|| "failed to extend uri path")
 }

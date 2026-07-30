@@ -56,12 +56,13 @@ impl Service<crate::Request> for RouterService {
     type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
     type Error = anyhow::Error;
 
-    fn call(&self, req: crate::Request) -> Self::Future {
+    fn call(&self, mut req: crate::Request) -> Self::Future {
         let routes = self.routes.clone();
         Box::pin(async move {
             let path = utils::path(&req);
             let path = Path::new(path).with_context(|| "failed to parse path")?;
-            if let Some(upstream) = routes.find_match(&path) {
+            if let Some((upstream, excess)) = routes.find_match(&path) {
+                req.path_extension = excess.to_vec().join("/");
                 upstream.call(req).await
             } else {
                 Ok(utils::http_error(StatusCode::NOT_FOUND))
@@ -76,10 +77,10 @@ pub struct Routes {
 }
 
 impl Routes {
-    fn find_match(&self, path: &Path) -> Option<&Source> {
+    fn find_match<'a>(&'a self, path: &'a Path) -> Option<(&'a Source, &'a [String])> {
         for (k, v) in self.inner.iter() {
-            if let RouteMatch::Match { .. } = k.matches(path) {
-                return Some(v);
+            if let RouteMatch::Match { excess } = k.matches(path) {
+                return Some((v, excess));
             }
         }
 

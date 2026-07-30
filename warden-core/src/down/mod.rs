@@ -60,6 +60,7 @@ impl ConnectionService {
                 request_service.call(crate::Request {
                     source: addr,
                     inner: req,
+                    path_extension: String::new(),
                 })
             });
 

@@ -17,6 +17,7 @@ pub const MAX_STATIC_HTML_FILE_SIZE: u64 = 1024 * 1024;
 pub struct Request {
     pub source: SocketAddr,
     pub inner: RawRequest,
+    pub path_extension: String,
 }
 
 pub type RawRequest = hyper::Request<hyper::body::Incoming>;
