@@ -135,6 +135,10 @@ impl Source {
             inner: Arc::new(inner),
         }
     }
+
+    pub fn inner(&self) -> &SourceInner {
+        &self.inner
+    }
 }
 
 impl Clone for Source {

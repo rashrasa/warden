@@ -87,3 +87,114 @@ impl Routes {
         None
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::core::SourceInner;
+
+    use super::*;
+
+    #[test]
+    fn basic_matches() {
+        let mut routes = Routes {
+            inner: HashMap::new(),
+        };
+
+        routes.inner.insert(
+            Route::new("const/path").unwrap(),
+            Source::new(SourceInner::StaticHtml(vec![90])),
+        );
+
+        let path = Path::new("const/path").unwrap();
+
+        let (source, excess) = routes.find_match(&path).unwrap();
+        match source.inner() {
+            SourceInner::StaticHtml(bytes) => {
+                assert_eq!(1, bytes.len());
+                assert_eq!(90, bytes[0]);
+            }
+            _ => {
+                panic!("SourceInner is not StaticHtml")
+            }
+        }
+
+        assert!(excess.is_empty())
+    }
+
+    #[test]
+    fn wildcard_matches() {
+        let mut routes = Routes {
+            inner: HashMap::new(),
+        };
+        routes.inner.insert(
+            Route::new("const/*").unwrap(),
+            Source::new(SourceInner::StaticHtml(vec![91])),
+        );
+        let path0 = Path::new("const/path").unwrap();
+        let path1 = Path::new("const/path1/path2/").unwrap();
+        let path3 = Path::new("").unwrap();
+
+        let (source, excess) = routes.find_match(&path0).unwrap();
+        match source.inner() {
+            SourceInner::StaticHtml(bytes) => {
+                assert_eq!(1, bytes.len());
+                assert_eq!(91, bytes[0]);
+            }
+            _ => {
+                panic!("SourceInner is not StaticHtml")
+            }
+        }
+
+        assert_eq!(1, excess.len());
+        assert_eq!("path", excess[0]);
+
+        let (source, excess) = routes.find_match(&path1).unwrap();
+        match source.inner() {
+            SourceInner::StaticHtml(bytes) => {
+                assert_eq!(1, bytes.len());
+                assert_eq!(91, bytes[0]);
+            }
+            _ => {
+                panic!("SourceInner is not StaticHtml")
+            }
+        }
+
+        assert_eq!(2, excess.len());
+        assert_eq!("path1", excess[0]);
+        assert_eq!("path2", excess[1]);
+
+        assert!(routes.find_match(&path3).is_none());
+    }
+
+    #[test]
+    fn mixed_matches() {
+        let mut routes = Routes {
+            inner: HashMap::new(),
+        };
+        routes.inner.insert(
+            Route::new("/").unwrap(),
+            Source::new(SourceInner::StaticHtml(vec![91])),
+        );
+        routes.inner.insert(
+            Route::new("/dyn").unwrap(),
+            Source::new(SourceInner::StaticHtml(vec![92])),
+        );
+        routes.inner.insert(
+            Route::new("/test/*").unwrap(),
+            Source::new(SourceInner::StaticHtml(vec![93])),
+        );
+        routes.inner.insert(
+            Route::new("/nginx/*").unwrap(),
+            Source::new(SourceInner::StaticHtml(vec![94])),
+        );
+        routes.inner.insert(
+            Route::new("/secure/*").unwrap(),
+            Source::new(SourceInner::Https),
+        );
+        let path = Path::new("/secure").unwrap();
+        let (source, excess) = routes.find_match(&path).unwrap();
+
+        assert!(matches!(source.inner(), SourceInner::Https));
+        assert!(excess.is_empty());
+    }
+}
