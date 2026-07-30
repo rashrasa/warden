@@ -10,6 +10,7 @@ use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
 };
+use static_assertions::assert_impl_all;
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -24,7 +25,7 @@ use crate::{
     core::config::ConfigurationDesc,
     down::ConnectionService,
     services::{AuthService, RouterService, ThrottleService},
-    up::http1::Http1Upstream,
+    up::Upstream,
     utils,
 };
 
@@ -232,8 +233,8 @@ pub enum SourceInner {
     /// Should not be used for high traffic routes since it's more computationally
     /// expensive.
     DynamicHtml(PathBuf),
-    Http(Uri, Http1Upstream),
-    Https,
+    Http(Uri, Upstream),
+    Https(Uri, Upstream),
 
     #[default]
     Unknown,
@@ -258,3 +259,6 @@ fn extend_path(uri: &Uri, ext: &str) -> anyhow::Result<Uri> {
         .build()
         .with_context(|| "failed to extend uri path")
 }
+
+assert_impl_all!(Source: Send);
+assert_impl_all!(SourceInner: Send);

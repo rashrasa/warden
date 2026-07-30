@@ -7,6 +7,7 @@ use std::{
 
 use http::{HeaderMap, HeaderValue, StatusCode};
 use hyper::service::Service;
+use static_assertions::assert_impl_all;
 use tokio::time::Instant;
 
 use crate::{PinnedFuture, UnwrapLog, utils::http_error_with_headers};
@@ -110,3 +111,7 @@ where
         })
     }
 }
+
+type SendType = u64;
+assert_impl_all!(SendType: Send);
+assert_impl_all!(ThrottleService<SendType>: Send);

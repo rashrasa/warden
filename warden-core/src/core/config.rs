@@ -12,7 +12,7 @@ use tokio::{
 
 use crate::{
     core::{Source, SourceInner},
-    up::http1::Http1Upstream,
+    up::Upstream,
 };
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -113,12 +113,21 @@ impl ConfigurationDesc {
                         .parse::<hyper::Uri>()
                         .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e))?;
 
-                    let up = Http1Upstream::connect(&url).await.map_err(|e| {
+                    let up = Upstream::http1(&url).await.map_err(|e| {
                         std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e)
                     })?;
                     Source::new(SourceInner::Http(url, up))
                 }
-                ProtocolDesc::Https => Source::new(SourceInner::Https),
+                ProtocolDesc::Https => {
+                    let url = path
+                        .parse::<hyper::Uri>()
+                        .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e))?;
+
+                    let up = Upstream::http2(&url).await.map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e)
+                    })?;
+                    Source::new(SourceInner::Https(url, up))
+                }
             };
         }
 

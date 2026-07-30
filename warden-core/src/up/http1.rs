@@ -5,7 +5,7 @@ use hyper_util::rt::TokioIo;
 use log::error;
 use tokio::{net::TcpStream, sync::Mutex};
 
-use crate::PinnedFuture;
+use crate::{PinnedFuture, up::collect_body};
 
 async fn make_http1_connection(
     io: TokioIo<TcpStream>,
@@ -57,20 +57,22 @@ struct Http1UpstreamInner {
 }
 
 impl Service<crate::Request> for Http1Upstream {
-    type Response = crate::IncomingResponse;
-    type Error = hyper::Error;
+    type Response = crate::FullResponse;
+    type Error = anyhow::Error;
     type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
 
     fn call(&self, req: crate::Request) -> Self::Future {
         let cloned = self.clone();
         Box::pin(async move {
-            cloned
+            let incoming = cloned
                 .inner
                 .lock()
                 .await
                 .sender
                 .send_request(req.inner)
-                .await
+                .await?;
+
+            collect_body(incoming).await
         })
     }
 }

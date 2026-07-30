@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::{Context, Error};
 use http::StatusCode;
 use hyper::service::Service;
+use static_assertions::assert_impl_all;
 
 use crate::{
     PinnedFuture,
@@ -88,9 +89,13 @@ impl Routes {
     }
 }
 
+assert_impl_all!(RouterService: Send);
+
 #[cfg(test)]
 mod test {
-    use crate::core::SourceInner;
+    use http::Uri;
+
+    use crate::{core::SourceInner, up::Upstream};
 
     use super::*;
 
@@ -166,8 +171,8 @@ mod test {
         assert!(routes.find_match(&path3).is_none());
     }
 
-    #[test]
-    fn mixed_matches() {
+    #[tokio::test]
+    async fn mixed_matches() {
         let mut routes = Routes {
             inner: HashMap::new(),
         };
@@ -189,12 +194,15 @@ mod test {
         );
         routes.inner.insert(
             Route::new("/secure/*").unwrap(),
-            Source::new(SourceInner::Https),
+            Source::new(SourceInner::Https(
+                Uri::from_static("https://localhost"),
+                Upstream::test().await.unwrap(),
+            )),
         );
         let path = Path::new("/secure").unwrap();
         let (source, excess) = routes.find_match(&path).unwrap();
 
-        assert!(matches!(source.inner(), SourceInner::Https));
+        assert!(matches!(source.inner(), SourceInner::Https(..)));
         assert!(excess.is_empty());
     }
 }

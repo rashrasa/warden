@@ -3,6 +3,7 @@ use std::sync::Arc;
 use http::StatusCode;
 use hyper::service::Service;
 use log::error;
+use static_assertions::assert_impl_all;
 
 use crate::{
     PinnedFuture,
@@ -112,3 +113,7 @@ where
         Ok(Authorization::default())
     }
 }
+
+type SendType = u64;
+assert_impl_all!(SendType: Send);
+assert_impl_all!(AuthService<SendType>: Send);
