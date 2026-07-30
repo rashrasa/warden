@@ -19,6 +19,7 @@ log = "0.4.33"
 rustls = "0.23.42"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+static_assertions = "1.1.0"
 tokio = { version = "1.52.4", features = [
     "signal",
     "net",
@@ -28,3 +29,4 @@ tokio = { version = "1.52.4", features = [
 ] }
 tokio-rustls = "0.26.4"
 tower = "0.5.3"
+webpki-roots = "1.0.9"
