@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::Context;
+use log::error;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs::{File, create_dir_all},
@@ -138,7 +140,16 @@ impl ConfigurationDesc {
 
     pub async fn from_path_or_default(p: impl AsRef<Path>) -> Self {
         let p = p.as_ref();
-        let mut config = Self::from_path(p).await.unwrap_or_default();
+        let mut config = match Self::from_path(p)
+            .await
+            .with_context(|| "config serialization failed")
+        {
+            Ok(ser) => ser,
+            Err(e) => {
+                error!("{e:#}");
+                ConfigurationDesc::default()
+            }
+        };
         config.path = p.to_path_buf();
         config
     }

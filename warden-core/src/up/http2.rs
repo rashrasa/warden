@@ -51,19 +51,21 @@ impl Http2Upstream {
 
         let connector = TlsConnector::from(Arc::new(config));
 
-        let host = uri.host().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                anyhow::anyhow!("invalid uri: {uri}"),
-            )
-        })?;
+        let host = uri
+            .host()
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    anyhow::anyhow!("invalid uri: {uri}"),
+                )
+            })?
+            .to_string();
         let address = format!("{host}:443");
         let stream = TcpStream::connect(address.clone()).await?;
 
         let tls = connector
             .connect(
-                address
-                    .try_into()
+                host.try_into()
                     .with_context(|| "failed to convert address to ServerName")?,
                 stream,
             )
