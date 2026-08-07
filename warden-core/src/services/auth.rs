@@ -79,6 +79,7 @@ where
 {
     pub fn parse_role(&self, request: &crate::Request) -> anyhow::Result<String> {
         match request.inner.headers().get(hyper::header::AUTHORIZATION) {
+            // TODO: indexing like this can panic
             Some(v) => verify_jwt(&v.as_bytes()[7..])
                 .map(|v| v.role)
                 .with_context(|| format!("failed to verify jwt {v:?}")),

@@ -1,7 +1,5 @@
 use anyhow::Context;
-use jsonwebtoken::{
-    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
-};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -10,6 +8,7 @@ pub struct Claims {
     pub exp: usize,
 }
 
+// TODO: extract encoding secret
 pub fn issue_jwt(role: String, exp: usize) -> anyhow::Result<String> {
     Ok(encode(
         &Header::new(Algorithm::HS512),
@@ -19,7 +18,6 @@ pub fn issue_jwt(role: String, exp: usize) -> anyhow::Result<String> {
 }
 
 pub fn verify_jwt(jwt: &[u8]) -> anyhow::Result<Claims> {
-    let header = decode_header(jwt).with_context(|| "failed to decode header")?;
     let claims = decode(
         jwt,
         &DecodingKey::from_secret("secret".as_bytes()),
