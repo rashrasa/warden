@@ -1,4 +1,5 @@
 pub mod config;
+pub mod jwt;
 pub mod route;
 
 use anyhow::Context;

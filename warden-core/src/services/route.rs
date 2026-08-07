@@ -1,8 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::{Context, Error};
 use http::StatusCode;
 use hyper::service::Service;
+use log::error;
 use static_assertions::assert_impl_all;
 
 use crate::{
@@ -10,6 +11,7 @@ use crate::{
     core::{
         Source,
         config::ConfigurationDesc,
+        jwt::issue_jwt,
         route::{Path, Route, RouteMatch},
     },
     utils,
@@ -61,6 +63,32 @@ impl Service<crate::Request> for RouterService {
         let routes = self.routes.clone();
         Box::pin(async move {
             let path = utils::path(&req);
+            if path == "/auth/create" {
+                match issue_jwt(
+                    "user1".into(),
+                    (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs()
+                        + 30) as usize,
+                ) {
+                    Ok(token) => {
+                        return Ok(utils::html_response(StatusCode::OK, &format!("
+                        <head></head>
+                        <body style=\"text-align: center;font-family:\'Trebuchet MS\',Helvetica,\'Times New Roman\',monospace;\">
+                            <h1>Success</h1>
+                            <hr />
+                            <p>Token</p>
+                            <textarea>{token}</textarea>
+                        </body>
+                        ")));
+                    }
+                    Err(e) => {
+                        error!("{e}");
+                        return Ok(utils::http_error(StatusCode::UNAUTHORIZED));
+                    }
+                }
+            }
             let path = Path::new(path).with_context(|| "failed to parse path")?;
             if let Some((upstream, excess)) = routes.find_match(&path) {
                 req.path_extension = excess.to_vec().join("/");

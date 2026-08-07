@@ -1,17 +1,19 @@
 use std::sync::Arc;
 
+use anyhow::Context;
 use http::StatusCode;
 use hyper::service::Service;
-use log::error;
+use log::{error, warn};
 use static_assertions::assert_impl_all;
 
 use crate::{
     PinnedFuture,
-    core::config::{ConfigurationDesc, FilterDesc},
+    core::{
+        config::{ConfigurationDesc, FilterDesc},
+        jwt::verify_jwt,
+    },
     utils::{http_error, path},
 };
-
-const USER_HEADER: &str = "x-warden-user";
 
 #[derive(Debug)]
 pub struct AuthService<S> {
@@ -75,10 +77,12 @@ impl<S> AuthService<S>
 where
     S: Service<crate::Request>,
 {
-    pub fn parse_role(&self, request: &crate::Request) -> Option<String> {
-        match request.inner.headers().get(USER_HEADER) {
-            Some(v) => String::from_utf8(v.as_bytes().to_vec()).ok(),
-            None => None,
+    pub fn parse_role(&self, request: &crate::Request) -> anyhow::Result<String> {
+        match request.inner.headers().get(hyper::header::AUTHORIZATION) {
+            Some(v) => verify_jwt(&v.as_bytes()[7..])
+                .map(|v| v.role)
+                .with_context(|| format!("failed to verify jwt {v:?}")),
+            None => Err(anyhow::Error::msg("no auth header")),
         }
     }
 
@@ -87,24 +91,38 @@ where
 
         if let Some(h) = self.config.handlers.get(path) {
             match &h.permission.filter {
-                FilterDesc::Allow => {
-                    if let Some(r) = self.parse_role(request) {
+                FilterDesc::Allow => match self
+                    .parse_role(request)
+                    .with_context(|| "failed to parse role for allow filter")
+                {
+                    Ok(r) => {
                         if h.permission.roles.contains(&r) {
                             return Ok(Authorization::Allowed);
                         } else {
                             return Ok(Authorization::Blocked);
                         }
                     }
-                }
+                    Err(e) => {
+                        error!("{e:#}");
+                        return Ok(Authorization::Blocked);
+                    }
+                },
                 FilterDesc::Block => {
-                    if let Some(r) = self.parse_role(request) {
-                        if h.permission.roles.contains(&r) {
-                            return Ok(Authorization::Blocked);
-                        } else {
-                            return Ok(Authorization::Allowed);
+                    match self
+                        .parse_role(request)
+                        .with_context(|| "failed to parse role for block filter")
+                    {
+                        Ok(r) => {
+                            if h.permission.roles.contains(&r) {
+                                return Ok(Authorization::Blocked);
+                            } else {
+                                return Ok(Authorization::Allowed);
+                            }
                         }
-                    } else {
-                        return Ok(Authorization::Allowed);
+                        Err(e) => {
+                            error!("{e:#}");
+                            return Ok(Authorization::Blocked);
+                        }
                     }
                 }
             }
