@@ -45,6 +45,7 @@ pub struct RoleDesc {
 #[serde(rename_all = "snake_case")]
 pub enum IdentityDesc {
     Jwt { secret: String },
+    Key(String),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -230,5 +231,30 @@ impl ConfigurationDesc {
             }
         };
         Ok(secret)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WITH_SECRET: &str = "{
+        \"identity\": {
+            \"jwt-default\": {
+              \"jwt\": { \"secret\": \"JWT_SECRET_TESTING\" }
+            }
+        },
+        \"handlers\": {},
+        \"roles\": {}
+    }";
+
+    #[test]
+    fn deserializes_default_jwt_secret() {
+        let deser: ConfigurationDesc = serde_json::from_str(WITH_SECRET).unwrap();
+
+        assert_eq!(
+            "JWT_SECRET_TESTING",
+            String::from_utf8(deser.default_jwt_secret().unwrap().to_vec()).unwrap()
+        );
     }
 }
