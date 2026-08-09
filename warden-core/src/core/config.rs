@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
-use log::error;
+use log::{error, warn};
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs::{File, create_dir_all},
@@ -23,6 +23,7 @@ pub struct ConfigurationDesc {
     #[serde(skip)]
     pub path: PathBuf,
     pub handlers: HashMap<String, LocationDesc>,
+    pub roles: HashMap<String, RoleDesc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -35,7 +36,15 @@ pub enum ProtocolDesc {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub struct RoleDesc {}
+pub struct RoleDesc {
+    identity: Vec<IdentityDesc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityDesc {
+    Jwt { secret: String },
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -135,7 +144,34 @@ impl ConfigurationDesc {
 
         config.path = p.to_path_buf();
 
-        Ok(config)
+        let mut missing_env = vec![];
+
+        // replace special strings
+        for r in config.roles.values_mut() {
+            for ident in r.identity.iter_mut() {
+                if let IdentityDesc::Jwt { secret } = ident
+                    && secret.starts_with("!env ")
+                    && secret.len() > 5
+                {
+                    let key = &secret[5..];
+                    match std::env::var(key) {
+                        Ok(v) => *secret = v,
+                        Err(_) => {
+                            missing_env.push(key.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+
+        if !missing_env.is_empty() {
+            Err(std::io::Error::new(
+                ErrorKind::NotFound,
+                anyhow::anyhow!("missing env variables: {}", missing_env.join(", ")),
+            ))
+        } else {
+            Ok(config)
+        }
     }
 
     pub async fn from_path_or_default(p: impl AsRef<Path>) -> Self {
@@ -147,6 +183,7 @@ impl ConfigurationDesc {
             Ok(ser) => ser,
             Err(e) => {
                 error!("{e:#}");
+                warn!("falling back to default config");
                 ConfigurationDesc::default()
             }
         };
