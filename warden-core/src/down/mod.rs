@@ -5,16 +5,10 @@ use hyper::{
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{debug, error};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpListener,
-};
+use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 use crate::core::RequestService;
-
-trait Io: AsyncRead + AsyncWrite + Unpin {}
-impl<T: AsyncRead + AsyncWrite + Unpin> Io for T {}
 
 pub struct ConnectionService {
     tcp: TcpListener,

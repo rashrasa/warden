@@ -33,7 +33,6 @@ use crate::{
 pub struct Warden {
     host: SocketAddr,
 
-    request_service: RequestService,
     connection_service: ConnectionService,
 
     config: Arc<ConfigurationDesc>,
@@ -80,7 +79,6 @@ impl Warden {
         Ok(Self {
             host,
             connection_service,
-            request_service,
 
             config,
         })

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use http::StatusCode;
 use hyper::service::Service;
-use log::{error, warn};
+use log::error;
 use static_assertions::assert_impl_all;
 
 use crate::{
