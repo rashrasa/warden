@@ -1,5 +1,6 @@
-use anyhow::Context;
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use jsonwebtoken::{
+    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode, errors::ErrorKind,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -18,12 +19,17 @@ pub fn issue_jwt(role: String, exp: usize) -> anyhow::Result<String> {
 }
 
 pub fn verify_jwt(jwt: &[u8]) -> anyhow::Result<Claims> {
-    let claims = decode(
+    let claims = match decode(
         jwt,
         &DecodingKey::from_secret("secret".as_bytes()),
         &Validation::new(Algorithm::HS512),
-    )
-    .with_context(|| "failed to decode jwt")?;
+    ) {
+        Ok(c) => Ok(c),
+        Err(e) => match e.kind() {
+            ErrorKind::ExpiredSignature => Err(anyhow::Error::from(e).context("token expired")),
+            _ => Err(anyhow::Error::from(e).context("failed to decode jwt")),
+        },
+    }?;
 
     Ok(claims.claims)
 }
