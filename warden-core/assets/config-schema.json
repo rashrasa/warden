@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warden-core/assets/config-schema.json",
+  "title": "Warden Configuration",
+  "description": "Configuration for the Warden API Gateway.",
+  "type": "object",
+  "properties": {
+    "roles": {
+      "type": "object",
+      "description": "Additional metadata for roles such as identity source."
+    },
+    "handlers": {}
+  }
+}
