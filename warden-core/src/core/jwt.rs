@@ -10,18 +10,18 @@ pub struct Claims {
 }
 
 // TODO: extract encoding secret
-pub fn issue_jwt(role: String, exp: usize) -> anyhow::Result<String> {
+pub fn issue_jwt(role: String, exp: usize, secret: &[u8]) -> anyhow::Result<String> {
     Ok(encode(
         &Header::new(Algorithm::HS512),
         &Claims { role, exp },
-        &EncodingKey::from_secret("secret".as_bytes()),
+        &EncodingKey::from_secret(secret),
     )?)
 }
 
-pub fn verify_jwt(jwt: &[u8]) -> anyhow::Result<Claims> {
+pub fn verify_jwt(jwt: &[u8], secret: &[u8]) -> anyhow::Result<Claims> {
     let claims = match decode(
         jwt,
-        &DecodingKey::from_secret("secret".as_bytes()),
+        &DecodingKey::from_secret(secret),
         &Validation::new(Algorithm::HS512),
     ) {
         Ok(c) => Ok(c),

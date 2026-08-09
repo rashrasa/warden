@@ -19,6 +19,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct RouterService {
+    config: Arc<ConfigurationDesc>,
     routes: Arc<Routes>,
 }
 
@@ -39,6 +40,7 @@ impl RouterService {
         }
         (
             Self {
+                config,
                 routes: Arc::new(Routes { inner: routes }),
             },
             errors,
@@ -50,6 +52,7 @@ impl Clone for RouterService {
     fn clone(&self) -> Self {
         Self {
             routes: Arc::clone(&self.routes),
+            config: Arc::clone(&self.config),
         }
     }
 }
@@ -60,7 +63,7 @@ impl Service<crate::Request> for RouterService {
     type Error = anyhow::Error;
 
     fn call(&self, mut req: crate::Request) -> Self::Future {
-        let routes = self.routes.clone();
+        let cloned = self.clone();
         Box::pin(async move {
             let path = utils::path(&req);
             if path == "/auth/create" {
@@ -71,6 +74,7 @@ impl Service<crate::Request> for RouterService {
                         .unwrap()
                         .as_secs()
                         + 30) as usize,
+                    cloned.config.default_jwt_secret()?,
                 ) {
                     Ok(token) => {
                         return Ok(utils::html_response(StatusCode::OK, &format!("
@@ -90,7 +94,7 @@ impl Service<crate::Request> for RouterService {
                 }
             }
             let path = Path::new(path).with_context(|| "failed to parse path")?;
-            if let Some((upstream, excess)) = routes.find_match(&path) {
+            if let Some((upstream, excess)) = cloned.routes.find_match(&path) {
                 req.path_extension = excess.to_vec().join("/");
                 upstream.call(req).await
             } else {

@@ -80,7 +80,7 @@ where
     pub fn parse_role(&self, request: &crate::Request) -> anyhow::Result<String> {
         match request.inner.headers().get(hyper::header::AUTHORIZATION) {
             // TODO: indexing like this can panic
-            Some(v) => verify_jwt(&v.as_bytes()[7..])
+            Some(v) => verify_jwt(&v.as_bytes()[7..], self.config.default_jwt_secret()?)
                 .map(|v| v.role)
                 .with_context(|| "failed to verify jwt"),
             None => Err(anyhow::Error::msg("no auth header")),

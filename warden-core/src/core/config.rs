@@ -24,6 +24,7 @@ pub struct ConfigurationDesc {
     pub path: PathBuf,
     pub handlers: HashMap<String, LocationDesc>,
     pub roles: HashMap<String, RoleDesc>,
+    pub identity: HashMap<String, IdentityDesc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -37,7 +38,7 @@ pub enum ProtocolDesc {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct RoleDesc {
-    identity: Vec<IdentityDesc>,
+    identity: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -147,31 +148,36 @@ impl ConfigurationDesc {
         let mut missing_env = vec![];
 
         // replace special strings
-        for r in config.roles.values_mut() {
-            for ident in r.identity.iter_mut() {
-                if let IdentityDesc::Jwt { secret } = ident
-                    && secret.starts_with("!env ")
-                    && secret.len() > 5
-                {
-                    let key = &secret[5..];
-                    match std::env::var(key) {
-                        Ok(v) => *secret = v,
-                        Err(_) => {
-                            missing_env.push(key.to_owned());
-                        }
+        for r in config.identity.values_mut() {
+            if let IdentityDesc::Jwt { secret } = r
+                && secret.starts_with("!env ")
+                && secret.len() > 5
+            {
+                let key = &secret[5..];
+                match std::env::var(key) {
+                    Ok(v) => *secret = v,
+                    Err(_) => {
+                        missing_env.push(key.to_owned());
                     }
                 }
             }
         }
 
+        if !config.identity.contains_key("jwt-default") {
+            return Err(std::io::Error::new(
+                ErrorKind::NotFound,
+                anyhow::anyhow!("jwt-default identity provider not found"),
+            ));
+        }
+
         if !missing_env.is_empty() {
-            Err(std::io::Error::new(
+            return Err(std::io::Error::new(
                 ErrorKind::NotFound,
                 anyhow::anyhow!("missing env variables: {}", missing_env.join(", ")),
-            ))
-        } else {
-            Ok(config)
+            ));
         }
+
+        Ok(config)
     }
 
     pub async fn from_path_or_default(p: impl AsRef<Path>) -> Self {
@@ -206,5 +212,23 @@ impl ConfigurationDesc {
         }
 
         Ok(())
+    }
+
+    pub fn default_jwt_secret(&self) -> anyhow::Result<&[u8]> {
+        let secret = match self.identity.get("jwt-default") {
+            Some(i) => {
+                if let IdentityDesc::Jwt { secret } = i {
+                    secret.as_bytes()
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "jwt-default identity provider is not formatted correctly"
+                    ));
+                }
+            }
+            None => {
+                return Err(anyhow::anyhow!("jwt-default identity provider is not set"));
+            }
+        };
+        Ok(secret)
     }
 }
