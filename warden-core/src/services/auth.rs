@@ -82,7 +82,7 @@ where
             // TODO: indexing like this can panic
             Some(v) => verify_jwt(&v.as_bytes()[7..])
                 .map(|v| v.role)
-                .with_context(|| format!("failed to verify jwt {v:?}")),
+                .with_context(|| "failed to verify jwt"),
             None => Err(anyhow::Error::msg("no auth header")),
         }
     }
