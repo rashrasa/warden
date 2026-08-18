@@ -4,7 +4,10 @@ use anyhow::Context;
 use hyper::{server::conn::http2, service::service_fn};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{debug, error};
-use tokio::net::TcpListener;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpListener,
+};
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
@@ -12,9 +15,12 @@ use crate::{
     services::route::Routes,
 };
 
+trait AsyncIo: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncIo for T {}
+
 pub struct ConnectionService {
     tcp: TcpListener,
-    tls: TlsAcceptor,
+    tls: Option<TlsAcceptor>,
     config: Arc<ConfigurationDesc>,
     routes: Arc<Routes>,
 }
@@ -22,7 +28,7 @@ pub struct ConnectionService {
 impl ConnectionService {
     pub fn new(
         tcp: TcpListener,
-        tls: TlsAcceptor,
+        tls: Option<TlsAcceptor>,
         config: Arc<ConfigurationDesc>,
         routes: Arc<Routes>,
     ) -> Self {
@@ -47,18 +53,24 @@ impl ConnectionService {
         let routes = Arc::clone(&self.routes);
 
         tokio::spawn(async move {
-            let tls_stream = match tls
-                .accept(stream)
-                .await
-                .with_context(|| "failed to perform tls handshake")
-            {
-                Ok(tls_stream) => tls_stream,
-                Err(e) => {
-                    error!("{e:#}");
-                    return;
+            let io: TokioIo<Box<dyn AsyncIo>> = match tls {
+                Some(tls) => {
+                    let tls_stream = match tls
+                        .accept(stream)
+                        .await
+                        .with_context(|| "failed to perform tls handshake")
+                    {
+                        Ok(tls_stream) => tls_stream,
+                        Err(e) => {
+                            error!("{e:#}");
+                            return;
+                        }
+                    };
+
+                    TokioIo::new(Box::new(tls_stream))
                 }
+                None => TokioIo::new(Box::new(stream)),
             };
-            let io = TokioIo::new(tls_stream);
 
             let service = service_fn(|req: crate::RawRequest| {
                 let config = Arc::clone(&config);

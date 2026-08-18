@@ -22,9 +22,18 @@ use crate::{
 pub struct ConfigurationDesc {
     #[serde(skip)]
     pub path: PathBuf,
+    pub host: String,
+    pub port: u16,
+    pub tls: Option<TlsConfig>,
     pub handlers: HashMap<String, LocationDesc>,
     pub roles: HashMap<String, RoleDesc>,
     pub identity: HashMap<String, IdentityDesc>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct TlsConfig {
+    pub certs: PathBuf,
+    pub key: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

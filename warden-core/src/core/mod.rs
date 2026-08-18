@@ -41,33 +41,39 @@ pub struct Warden {
 }
 
 impl Warden {
-    pub async fn bind(host: SocketAddr, config_path: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub async fn start(config_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let config_path = config_path.as_ref();
 
-        // Setup TLS
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let config = Arc::new(ConfigurationDesc::from_path_or_default(config_path).await);
+        let tls_acceptor = match &config.tls {
+            Some(tls) => {
+                // Setup TLS
+                let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        let certs = CertificateDer::pem_file_iter("temp/server.crt")?
-            .collect::<Result<Vec<_>, _>>()
-            .with_context(|| "failed to read cert file")?;
+                let certs = CertificateDer::pem_file_iter(&tls.certs)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .with_context(|| "failed to read cert file")?;
 
-        let key = PrivateKeyDer::from_pem_file("temp/server.key")
-            .with_context(|| "failed to read private key file")?;
+                let key = PrivateKeyDer::from_pem_file(&tls.key)
+                    .with_context(|| "failed to read private key file")?;
 
-        let mut server_config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .with_context(|| "failed to create TLS server config")?;
+                let mut server_config = ServerConfig::builder()
+                    .with_no_client_auth()
+                    .with_single_cert(certs, key)
+                    .with_context(|| "failed to create TLS server config")?;
 
-        server_config.alpn_protocols =
-            vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
-        let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
-
+                server_config.alpn_protocols =
+                    vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+                Some(TlsAcceptor::from(Arc::new(server_config)))
+            }
+            None => None,
+        };
+        let host: SocketAddr = SocketAddr::from_str(&format!("{}:{}", config.host, config.port))
+            .with_context(|| "failed to parse host")?;
         let listener: TcpListener = TcpListener::bind(host).await?;
 
         info!("server started @ {}", host);
 
-        let config = Arc::new(ConfigurationDesc::from_path_or_default(config_path).await);
         let (routes, errors) = RouterService::parse_routes(&config);
         let routes = Arc::new(routes);
 
