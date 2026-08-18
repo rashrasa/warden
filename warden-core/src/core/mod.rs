@@ -25,9 +25,9 @@ use crate::{
     PinnedFuture,
     core::config::ConfigurationDesc,
     down::ConnectionService,
-    services::{AuthService, RouterService, ThrottleService},
+    services::{AuthService, RouterService, ThrottleService, route::Routes},
     up::Upstream,
-    utils,
+    utils::{self, http_error},
 };
 
 pub struct Warden {
@@ -36,6 +36,8 @@ pub struct Warden {
     connection_service: ConnectionService,
 
     config: Arc<ConfigurationDesc>,
+
+    routes: Arc<Routes>,
 }
 
 impl Warden {
@@ -66,21 +68,27 @@ impl Warden {
         info!("server started @ {}", host);
 
         let config = Arc::new(ConfigurationDesc::from_path_or_default(config_path).await);
-
-        let (request_service, errors) = RequestService::new(&config);
+        let (routes, errors) = RouterService::parse_routes(&config);
+        let routes = Arc::new(routes);
 
         if !errors.is_empty() {
-            error!("route parsing failed for some routes\n{errors:?}");
+            return Err(anyhow::anyhow!("failed to parse routes: {:#?}", errors));
         }
 
-        let connection_service =
-            ConnectionService::new(listener, tls_acceptor, request_service.clone());
+        let connection_service = ConnectionService::new(
+            listener,
+            tls_acceptor,
+            Arc::clone(&config),
+            Arc::clone(&routes),
+        );
 
         Ok(Self {
             host,
             connection_service,
 
             config,
+
+            routes,
         })
     }
 
@@ -97,30 +105,31 @@ impl Warden {
     }
 }
 
-#[derive(Clone)]
-pub struct RequestService {
-    inner: ThrottleService<AuthService<RouterService>>,
-}
+pub struct RequestService;
 
 impl RequestService {
-    pub fn new(config: &Arc<ConfigurationDesc>) -> (Self, Vec<anyhow::Error>) {
-        let (router, errors) = RouterService::new(Arc::clone(config));
-        (
-            Self {
-                inner: ThrottleService::new(AuthService::new(Arc::clone(config), router)),
-            },
-            errors,
-        )
-    }
-}
+    pub async fn handle_request(
+        config: impl AsRef<ConfigurationDesc>,
+        routes: impl AsRef<Routes>,
+        request: crate::Request,
+    ) -> crate::FullResponse {
+        let request = match AuthService::handle_request(&config, request).await {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
 
-impl Service<crate::Request> for RequestService {
-    type Response = crate::FullResponse;
-    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
-    type Error = anyhow::Error;
+        let request = match ThrottleService::handle_request(&config, request).await {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
 
-    fn call(&self, req: crate::Request) -> Self::Future {
-        self.inner.call(req)
+        match RouterService::route(&config, routes, request).await {
+            Ok(res) => res,
+            Err(e) => {
+                error!("{:#}", e.context("failed to handle request"));
+                http_error(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        }
     }
 }
 

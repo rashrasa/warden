@@ -1,28 +1,36 @@
+use std::sync::Arc;
+
 use anyhow::Context;
-use hyper::{
-    server::conn::http2,
-    service::{Service, service_fn},
-};
+use hyper::{server::conn::http2, service::service_fn};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{debug, error};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
-use crate::core::RequestService;
+use crate::{
+    core::{RequestService, config::ConfigurationDesc},
+    services::route::Routes,
+};
 
 pub struct ConnectionService {
     tcp: TcpListener,
     tls: TlsAcceptor,
-
-    request_service: RequestService,
+    config: Arc<ConfigurationDesc>,
+    routes: Arc<Routes>,
 }
 
 impl ConnectionService {
-    pub fn new(tcp: TcpListener, tls: TlsAcceptor, request_service: RequestService) -> Self {
+    pub fn new(
+        tcp: TcpListener,
+        tls: TlsAcceptor,
+        config: Arc<ConfigurationDesc>,
+        routes: Arc<Routes>,
+    ) -> Self {
         Self {
             tcp,
             tls,
-            request_service,
+            config,
+            routes,
         }
     }
 
@@ -35,7 +43,9 @@ impl ConnectionService {
 
         debug!("new connection: {}", addr);
         let tls = self.tls.clone();
-        let request_service = self.request_service.clone();
+        let config = Arc::clone(&self.config);
+        let routes = Arc::clone(&self.routes);
+
         tokio::spawn(async move {
             let tls_stream = match tls
                 .accept(stream)
@@ -51,11 +61,22 @@ impl ConnectionService {
             let io = TokioIo::new(tls_stream);
 
             let service = service_fn(|req: crate::RawRequest| {
-                request_service.call(crate::Request {
-                    source: addr,
-                    inner: req,
-                    path_extension: String::new(),
-                })
+                let config = Arc::clone(&config);
+                let routes = Arc::clone(&routes);
+                async move {
+                    Ok::<_, anyhow::Error>(
+                        RequestService::handle_request(
+                            config,
+                            routes,
+                            crate::Request {
+                                source: addr,
+                                inner: req,
+                                path_extension: String::new(),
+                            },
+                        )
+                        .await,
+                    )
+                }
             });
 
             if let Err(e) = http2::Builder::new(TokioExecutor::new())

@@ -185,7 +185,7 @@ impl ConfigurationDesc {
         let p = p.as_ref();
         let mut config = match Self::from_path(p)
             .await
-            .with_context(|| "config serialization failed")
+            .with_context(|| "config deserialization failed")
         {
             Ok(ser) => ser,
             Err(e) => {

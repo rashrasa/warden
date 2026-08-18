@@ -7,7 +7,6 @@ use log::error;
 use static_assertions::assert_impl_all;
 
 use crate::{
-    PinnedFuture,
     core::{
         Source,
         config::ConfigurationDesc,
@@ -18,13 +17,11 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct RouterService {
-    config: Arc<ConfigurationDesc>,
-    routes: Arc<Routes>,
-}
+pub struct RouterService;
 
 impl RouterService {
-    pub fn new(config: Arc<ConfigurationDesc>) -> (Self, Vec<Error>) {
+    pub fn parse_routes(config: impl AsRef<ConfigurationDesc>) -> (Routes, Vec<Error>) {
+        let config = config.as_ref();
         let mut routes = HashMap::new();
         let mut errors = vec![];
 
@@ -38,46 +35,29 @@ impl RouterService {
                 }
             }
         }
-        (
-            Self {
-                config,
-                routes: Arc::new(Routes { inner: routes }),
-            },
-            errors,
-        )
+        (Routes { inner: routes }, errors)
     }
-}
 
-impl Clone for RouterService {
-    fn clone(&self) -> Self {
-        Self {
-            routes: Arc::clone(&self.routes),
-            config: Arc::clone(&self.config),
-        }
-    }
-}
-
-impl Service<crate::Request> for RouterService {
-    type Response = crate::FullResponse;
-    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
-    type Error = anyhow::Error;
-
-    fn call(&self, mut req: crate::Request) -> Self::Future {
-        let cloned = self.clone();
-        Box::pin(async move {
-            let path = utils::path(&req);
-            if path == "/auth/create" {
-                match issue_jwt(
-                    "user1".into(),
-                    (std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs()
-                        + 30) as usize,
-                    cloned.config.default_jwt_secret()?,
-                ) {
-                    Ok(token) => {
-                        return Ok(utils::html_response(StatusCode::OK, &format!("
+    pub async fn route(
+        config: impl AsRef<ConfigurationDesc>,
+        routes: impl AsRef<Routes>,
+        mut request: crate::Request,
+    ) -> anyhow::Result<crate::FullResponse> {
+        let config = config.as_ref();
+        let routes = routes.as_ref();
+        let path: &str = utils::path(&request);
+        if path == "/auth/create" {
+            match issue_jwt(
+                "user1".into(),
+                (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    + 30) as usize,
+                config.default_jwt_secret()?,
+            ) {
+                Ok(token) => {
+                    return Ok(utils::html_response(StatusCode::OK, &format!("
                         <head></head>
                         <body style=\"text-align: center;font-family:\'Trebuchet MS\',Helvetica,\'Times New Roman\',monospace;\">
                             <h1>Success</h1>
@@ -86,21 +66,20 @@ impl Service<crate::Request> for RouterService {
                             <textarea>{token}</textarea>
                         </body>
                         ")));
-                    }
-                    Err(e) => {
-                        error!("{e}");
-                        return Ok(utils::http_error(StatusCode::UNAUTHORIZED));
-                    }
+                }
+                Err(e) => {
+                    error!("{e}");
+                    return Ok(utils::http_error(StatusCode::UNAUTHORIZED));
                 }
             }
-            let path = Path::new(path).with_context(|| "failed to parse path")?;
-            if let Some((upstream, excess)) = cloned.routes.find_match(&path) {
-                req.path_extension = excess.to_vec().join("/");
-                upstream.call(req).await
-            } else {
-                Ok(utils::http_error(StatusCode::NOT_FOUND))
-            }
-        })
+        }
+        let path = Path::new(path).with_context(|| "failed to parse path")?;
+        if let Some((upstream, excess)) = routes.find_match(&path) {
+            request.path_extension = excess.to_vec().join("/");
+            upstream.call(request).await
+        } else {
+            Ok(utils::http_error(StatusCode::NOT_FOUND))
+        }
     }
 }
 
