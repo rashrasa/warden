@@ -8,15 +8,12 @@ An API gateway written in Rust.
 
 ```json
 {
-  "identity": {
-    "jwt-default": {
-      "jwt": { "secret": "!env WARDEN_JWT_SIGNING_SECRET" }
-    }
-  },
-  "roles": {
-    "user1": {
-      "identity": ["jwt-default"]
-    }
+  "$schema": "../warden-core/assets/config-schema.json",
+  "host": "0.0.0.0",
+  "port": 3000,
+  "tls": {
+    "certs": "temp/server.crt",
+    "key": "temp/server.key"
   },
   "handlers": {
     "/": {
@@ -24,8 +21,14 @@ An API gateway written in Rust.
       "path": "./warden-core/assets/hello.html",
       "cache": "static",
       "permission": {
-        "type": "block",
-        "roles": []
+        "filter": "ne",
+        "field": {
+          "jwt_claim": {
+            "provider": "default",
+            "key": "user"
+          }
+        },
+        "any": ["blocked_user1", "blocked_user2", "blocked_user3"]
       }
     },
     "/dyn": {
@@ -33,10 +36,24 @@ An API gateway written in Rust.
       "path": "./warden-core/assets/dynamic.html",
       "cache": "none",
       "permission": {
-        "type": "allow",
-        "roles": ["user1"]
+        "filter": "eq",
+        "field": {
+          "jwt_claim": {
+            "provider": "default",
+            "key": "user"
+          }
+        },
+        "value": "service_role"
+      }
+    }
+  },
+  "providers": {
+    "default": {
+      "jwt": {
+        "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwmK6SSAu2E9V7uynkCKEaj5nZJyTvNG4x0KohsRzLpg=\n-----END PUBLIC KEY-----"
       }
     }
   }
 }
+
 ```

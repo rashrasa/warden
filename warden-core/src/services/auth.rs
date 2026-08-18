@@ -4,7 +4,7 @@ use log::error;
 
 use crate::{
     core::{
-        config::{ConfigurationDesc, FilterDesc},
+        config::{ConfigurationDesc, FieldDesc, FilterDesc, IdentityProviderDesc, ValueDesc},
         jwt::verify_jwt,
     },
     utils::{http_error, path},
@@ -30,71 +30,74 @@ impl AuthService {
         }
     }
 
-    pub fn parse_role(
-        config: impl AsRef<ConfigurationDesc>,
-        request: &crate::Request,
-    ) -> anyhow::Result<String> {
-        let config = config.as_ref();
-        match request.inner.headers().get(hyper::header::AUTHORIZATION) {
-            // TODO: indexing like this can panic
-            Some(v) => verify_jwt(&v.as_bytes()[7..], config.default_jwt_secret()?)
-                .map(|v| v.role)
-                .with_context(|| "failed to verify jwt"),
-            None => Err(anyhow::Error::msg("no auth header")),
-        }
-    }
-
     pub fn verify_request(
         config: impl AsRef<ConfigurationDesc>,
         request: &crate::Request,
     ) -> anyhow::Result<Authorization> {
+        let config = config.as_ref();
         let path = path(request);
 
-        if let Some(h) = config.as_ref().handlers.get(path) {
-            match &h.permission.filter {
-                FilterDesc::Allow => match Self::parse_role(&config, request)
-                    .with_context(|| "failed to parse role for allow filter")
-                {
-                    Ok(r) => {
-                        if h.permission.roles.contains(&r) {
-                            return Ok(Authorization::Allowed);
-                        } else {
-                            return Ok(Authorization::Blocked);
-                        }
-                    }
-                    Err(e) => {
-                        error!("{e:#}");
-                        return Ok(Authorization::Blocked);
-                    }
-                },
-                FilterDesc::Block => {
-                    match Self::parse_role(&config, request)
-                        .with_context(|| "failed to parse role for block filter")
+        if let Some(h) = config.handlers.get(path) {
+            let field = &h.permission.field;
+            let value = &h.permission.value;
+            let filter = &h.permission.filter;
+            match field {
+                FieldDesc::JwtClaim { provider, key } => {
+                    if let Some(auth_header) =
+                        request.inner.headers().get(hyper::header::AUTHORIZATION)
                     {
-                        Ok(r) => {
-                            if h.permission.roles.contains(&r) {
-                                return Ok(Authorization::Blocked);
-                            } else {
-                                return Ok(Authorization::Allowed);
+                        let token = &auth_header.as_bytes()[7..];
+                        if let Some(provider) = config.providers.get(provider)
+                            && let IdentityProviderDesc::Jwt { public_key_pem } = provider
+                        {
+                            let claims = match verify_jwt(token, public_key_pem.as_bytes())
+                                .with_context(|| "failed to verify jwt")
+                            {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    error!("{e:#}");
+                                    return Ok(Authorization::Blocked);
+                                }
+                            };
+                            if let Some(claim_value) = claims.other.get(key) {
+                                match filter {
+                                    FilterDesc::Equals => match value {
+                                        ValueDesc::Any { any } => {
+                                            if any.iter().any(|v| v == claim_value) {
+                                                return Ok(Authorization::Allowed);
+                                            }
+                                        }
+                                        ValueDesc::Value { value } => {
+                                            if value == claim_value {
+                                                return Ok(Authorization::Allowed);
+                                            }
+                                        }
+                                    },
+                                    FilterDesc::NotEquals => match value {
+                                        ValueDesc::Any { any } => {
+                                            if any.iter().all(|v| v != claim_value) {
+                                                return Ok(Authorization::Allowed);
+                                            }
+                                        }
+                                        ValueDesc::Value { value } => {
+                                            if value != claim_value {
+                                                return Ok(Authorization::Allowed);
+                                            }
+                                        }
+                                    },
+                                }
                             }
-                        }
-                        Err(e) => {
-                            error!("{e:#}");
-                            return Ok(Authorization::Blocked);
                         }
                     }
                 }
             }
         }
 
-        Ok(Authorization::default())
+        Ok(Authorization::Blocked)
     }
 }
 
-#[derive(Default)]
 pub enum Authorization {
-    #[default]
     Allowed,
-
     Blocked,
 }

@@ -17,20 +17,36 @@ use crate::{
     up::Upstream,
 };
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ConfigurationDesc {
+    // Option to avoid using empty path as sentinal value
     #[serde(skip)]
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
+
     pub host: String,
     pub port: u16,
+
     pub tls: Option<TlsConfig>,
     pub handlers: HashMap<String, LocationDesc>,
-    pub roles: HashMap<String, RoleDesc>,
-    pub identity: HashMap<String, IdentityDesc>,
+    pub providers: HashMap<String, IdentityProviderDesc>,
+}
+
+impl Default for ConfigurationDesc {
+    fn default() -> Self {
+        Self {
+            path: None,
+            host: String::from("127.0.0.1"),
+            port: 3000,
+            tls: None,
+            handlers: HashMap::new(),
+            providers: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct TlsConfig {
     pub certs: PathBuf,
     pub key: PathBuf,
@@ -52,24 +68,59 @@ pub struct RoleDesc {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum IdentityDesc {
-    Jwt { secret: String },
-    Key(String),
+pub enum IdentityProviderDesc {
+    Jwt { public_key_pem: String },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterDesc {
-    Allow,
-    Block,
+    Equals,
+    NotEquals,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldDesc {
+    /// Specifies a JWT claim field by key. This check is performed
+    /// after the JWT has been validated.
+    ///
+    /// Note: exp claims are already validated.
+    JwtClaim { provider: String, key: String },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct PermissionDesc {
-    #[serde(rename = "type")]
     pub filter: FilterDesc,
-    pub roles: Vec<String>,
+    pub field: FieldDesc,
+
+    #[serde(flatten)]
+    pub value: ValueDesc,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum ValueDesc {
+    /// When paired with `FilterDesc::Ne`, represents a Not-In relationship.
+    Any {
+        any: Vec<serde_json::Value>,
+    },
+    Value {
+        value: serde_json::Value,
+    },
+}
+
+/// Claims are externally set by an identity provider.
+///
+/// For the purposes of this API gateway, the expiration (exp) claim is mandatory and is extracted.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    // Expiration is mandatory.
+    pub exp: usize,
+
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -153,13 +204,15 @@ impl ConfigurationDesc {
             };
         }
 
-        config.path = p.to_path_buf();
+        config.path = Some(p.to_path_buf());
 
         let mut missing_env = vec![];
 
         // replace special strings
-        for r in config.identity.values_mut() {
-            if let IdentityDesc::Jwt { secret } = r
+        for r in config.providers.values_mut() {
+            if let IdentityProviderDesc::Jwt {
+                public_key_pem: secret,
+            } = r
                 && secret.starts_with("!env ")
                 && secret.len() > 5
             {
@@ -171,13 +224,6 @@ impl ConfigurationDesc {
                     }
                 }
             }
-        }
-
-        if !config.identity.contains_key("jwt-default") {
-            return Err(std::io::Error::new(
-                ErrorKind::NotFound,
-                anyhow::anyhow!("jwt-default identity provider not found"),
-            ));
         }
 
         if !missing_env.is_empty() {
@@ -203,16 +249,18 @@ impl ConfigurationDesc {
                 ConfigurationDesc::default()
             }
         };
-        config.path = p.to_path_buf();
+        config.path = Some(p.to_path_buf());
         config
     }
 
     pub async fn save_if_missing(&self) -> std::io::Result<()> {
-        if !self.path.try_exists()? {
-            if let Some(parent) = self.path.parent() {
+        if let Some(path) = &self.path
+            && !path.try_exists()?
+        {
+            if let Some(parent) = path.parent() {
                 create_dir_all(parent).await?;
             }
-            File::create(&self.path)
+            File::create(&path)
                 .await?
                 .write_all(
                     &serde_json::to_vec_pretty(self)
@@ -222,48 +270,5 @@ impl ConfigurationDesc {
         }
 
         Ok(())
-    }
-
-    pub fn default_jwt_secret(&self) -> anyhow::Result<&[u8]> {
-        let secret = match self.identity.get("jwt-default") {
-            Some(i) => {
-                if let IdentityDesc::Jwt { secret } = i {
-                    secret.as_bytes()
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "jwt-default identity provider is not formatted correctly"
-                    ));
-                }
-            }
-            None => {
-                return Err(anyhow::anyhow!("jwt-default identity provider is not set"));
-            }
-        };
-        Ok(secret)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const WITH_SECRET: &str = "{
-        \"identity\": {
-            \"jwt-default\": {
-              \"jwt\": { \"secret\": \"JWT_SECRET_TESTING\" }
-            }
-        },
-        \"handlers\": {},
-        \"roles\": {}
-    }";
-
-    #[test]
-    fn deserializes_default_jwt_secret() {
-        let deser: ConfigurationDesc = serde_json::from_str(WITH_SECRET).unwrap();
-
-        assert_eq!(
-            "JWT_SECRET_TESTING",
-            String::from_utf8(deser.default_jwt_secret().unwrap().to_vec()).unwrap()
-        );
     }
 }

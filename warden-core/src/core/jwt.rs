@@ -1,32 +1,27 @@
-use jsonwebtoken::{
-    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode, errors::ErrorKind,
-};
-use serde::{Deserialize, Serialize};
+use anyhow::Context;
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, errors::ErrorKind};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
-    pub role: String,
-    pub exp: usize,
-}
+use crate::core::config::Claims;
 
-// TODO: extract encoding secret
-pub fn issue_jwt(role: String, exp: usize, secret: &[u8]) -> anyhow::Result<String> {
-    Ok(encode(
-        &Header::new(Algorithm::HS512),
-        &Claims { role, exp },
-        &EncodingKey::from_secret(secret),
-    )?)
-}
-
-pub fn verify_jwt(jwt: &[u8], secret: &[u8]) -> anyhow::Result<Claims> {
+/// Validates token signature and expiration.
+pub fn verify_jwt(jwt: &[u8], public_key_pem: &[u8]) -> anyhow::Result<Claims> {
     let claims = match decode(
         jwt,
-        &DecodingKey::from_secret(secret),
-        &Validation::new(Algorithm::HS512),
+        &DecodingKey::from_ed_pem(public_key_pem)
+            .with_context(|| "failed to create DecodingKey")?,
+        &Validation::new(Algorithm::EdDSA),
     ) {
         Ok(c) => Ok(c),
         Err(e) => match e.kind() {
             ErrorKind::ExpiredSignature => Err(anyhow::Error::from(e).context("token expired")),
+            ErrorKind::Json(ser_err) => {
+                if ser_err.is_data() {
+                    Err(anyhow::Error::from(e)
+                        .context("jwt deserialization failed. exp claim may be missing"))
+                } else {
+                    Err(anyhow::Error::from(e).context("jwt deserialization failed"))
+                }
+            }
             _ => Err(anyhow::Error::from(e).context("failed to decode jwt")),
         },
     }?;
