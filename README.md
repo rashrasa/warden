@@ -21,7 +21,7 @@ An API gateway written in Rust.
       "path": "./warden-core/assets/hello.html",
       "cache": "static",
       "permission": {
-        "filter": "ne",
+        "filter": "not_equals",
         "field": {
           "jwt_claim": {
             "provider": "default",
@@ -36,7 +36,7 @@ An API gateway written in Rust.
       "path": "./warden-core/assets/dynamic.html",
       "cache": "none",
       "permission": {
-        "filter": "eq",
+        "filter": "equals",
         "field": {
           "jwt_claim": {
             "provider": "default",
