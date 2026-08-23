@@ -66,7 +66,7 @@ impl Http2Upstream {
         let tls = connector
             .connect(
                 host.try_into()
-                    .with_context(|| "failed to convert address to ServerName")?,
+                    .with_context(|| "failed to deserialize address")?,
                 stream,
             )
             .await?;
