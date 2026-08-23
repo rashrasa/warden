@@ -2,6 +2,14 @@
 
 An API gateway written in Rust.
 
+## Scope
+
+- L4 and L7 throttling
+- Caching
+- JWT-Based Authentication
+- Health Checks
+- Load Balancing
+
 ## Configuration
 
 ### Example
