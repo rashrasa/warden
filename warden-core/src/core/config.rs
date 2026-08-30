@@ -20,9 +20,8 @@ use crate::{
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ConfigurationDesc {
-    // Option to avoid using empty path as sentinal value
     #[serde(skip)]
-    pub path: Option<PathBuf>,
+    pub path: PathBuf,
 
     pub host: String,
     pub port: u16,
@@ -30,17 +29,37 @@ pub struct ConfigurationDesc {
     pub tls: Option<TlsConfig>,
     pub handlers: HashMap<String, LocationDesc>,
     pub providers: HashMap<String, IdentityProviderDesc>,
+    pub global: GlobalConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GlobalConfig {
+    pub host_throttle: Option<GlobalHostThrottleConfig>,
+    pub header_size_max: Option<u32>,
+    pub connection_concurrent_requests_max: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GlobalHostThrottleConfig {
+    pub bandwidth_limit_kbps: u64,
 }
 
 impl Default for ConfigurationDesc {
     fn default() -> Self {
         Self {
-            path: None,
+            path: PathBuf::new(),
             host: String::from("127.0.0.1"),
             port: 3000,
             tls: None,
             handlers: HashMap::new(),
             providers: HashMap::new(),
+            global: GlobalConfig {
+                host_throttle: None,
+                connection_concurrent_requests_max: None,
+                header_size_max: None,
+            },
         }
     }
 }
@@ -166,17 +185,6 @@ impl ConfigurationDesc {
                         let mut buf = vec![];
                         let mut file = File::open(&path).await?;
 
-                        let meta = file.metadata().await?;
-
-                        if meta.len() > crate::MAX_STATIC_HTML_FILE_SIZE {
-                            return Err(std::io::Error::new(
-                                ErrorKind::FileTooLarge,
-                                anyhow::Error::msg(format!(
-                                    "html file at {path:?} exceeds max size {}",
-                                    crate::MAX_STATIC_HTML_FILE_SIZE
-                                )),
-                            ));
-                        }
                         file.read_to_end(&mut buf).await?;
                         Source::new(SourceInner::StaticHtml(buf))
                     }
@@ -204,7 +212,7 @@ impl ConfigurationDesc {
             };
         }
 
-        config.path = Some(p.to_path_buf());
+        config.path = p.to_path_buf();
 
         let mut missing_env = vec![];
 
@@ -249,18 +257,16 @@ impl ConfigurationDesc {
                 ConfigurationDesc::default()
             }
         };
-        config.path = Some(p.to_path_buf());
+        config.path = p.to_path_buf();
         config
     }
 
     pub async fn save_if_missing(&self) -> std::io::Result<()> {
-        if let Some(path) = &self.path
-            && !path.try_exists()?
-        {
-            if let Some(parent) = path.parent() {
+        if !self.path.try_exists()? {
+            if let Some(parent) = self.path.parent() {
                 create_dir_all(parent).await?;
             }
-            File::create(&path)
+            File::create(&self.path)
                 .await?
                 .write_all(
                     &serde_json::to_vec_pretty(self)

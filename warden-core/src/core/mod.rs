@@ -1,6 +1,7 @@
 pub mod config;
 pub mod jwt;
 pub mod route;
+pub mod tcp;
 
 use anyhow::Context;
 use http::{StatusCode, Uri, uri::PathAndQuery};
@@ -17,8 +18,9 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
+    time::Duration,
 };
-use tokio::{fs::File, io::AsyncReadExt, net::TcpListener};
+use tokio::{fs::File, io::AsyncReadExt, net::TcpListener, time::Instant};
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
@@ -276,3 +278,42 @@ fn extend_path(uri: &Uri, ext: &str) -> anyhow::Result<Uri> {
 
 assert_impl_all!(Source: Send);
 assert_impl_all!(SourceInner: Send);
+
+pub struct Meter {
+    limit: u64,
+    window: Duration,
+
+    last: Instant,
+    count: u64,
+}
+
+impl Meter {
+    pub fn new(limit: u64, window: Duration) -> Self {
+        Self {
+            limit,
+            window,
+            last: Instant::now(),
+            count: 0,
+        }
+    }
+
+    pub fn tick(&mut self, amt: u64) -> MeterTickResult {
+        let now = Instant::now();
+        self.count += amt;
+        if now - self.last > self.window {
+            self.count -= self.limit;
+            self.last = now;
+        }
+
+        if self.count > self.limit {
+            MeterTickResult::Exceeds
+        } else {
+            MeterTickResult::Within
+        }
+    }
+}
+
+pub enum MeterTickResult {
+    Within,
+    Exceeds,
+}

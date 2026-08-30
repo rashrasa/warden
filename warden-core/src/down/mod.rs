@@ -11,12 +11,15 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
-    core::{RequestService, config::ConfigurationDesc},
+    PinnedFuture,
+    core::{RequestService, config::ConfigurationDesc, tcp::AsyncRateLimiter},
     services::route::Routes,
 };
 
 trait AsyncIo: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncIo for T {}
+
+type PinnedFutureFactory<Arg, Ret> = Box<dyn Fn(Arg) -> PinnedFuture<Ret> + Send + 'static>;
 
 pub struct ConnectionService {
     tcp: TcpListener,
@@ -52,6 +55,14 @@ impl ConnectionService {
         let config = Arc::clone(&self.config);
         let routes = Arc::clone(&self.routes);
 
+        let stream: Box<dyn AsyncIo> = match &config.global.host_throttle {
+            Some(thr) => Box::new(AsyncRateLimiter::new(stream, thr.bandwidth_limit_kbps)),
+            None => Box::new(stream),
+        };
+
+        // Connection Task
+        //
+        // Executes all requests from a single source.
         tokio::spawn(async move {
             let io: TokioIo<Box<dyn AsyncIo>> = match tls {
                 Some(tls) => {
@@ -71,30 +82,50 @@ impl ConnectionService {
                 }
                 None => TokioIo::new(Box::new(stream)),
             };
+            let config_fn = Arc::clone(&config);
+            let routes_fn = Arc::clone(&routes);
 
-            let service = service_fn(|req: crate::RawRequest| {
-                let config = Arc::clone(&config);
-                let routes = Arc::clone(&routes);
-                async move {
-                    Ok::<_, anyhow::Error>(
-                        RequestService::handle_request(
-                            config,
-                            routes,
-                            crate::Request {
-                                source: addr,
-                                inner: req,
-                                path_extension: String::new(),
-                            },
-                        )
-                        .await,
-                    )
-                }
-            });
+            let clsr: PinnedFutureFactory<crate::RawRequest, anyhow::Result<crate::FullResponse>> = {
+                let config = config_fn;
+                let routes = routes_fn;
+                Box::new(move |req: crate::RawRequest| {
+                    let config = Arc::clone(&config);
+                    let routes = Arc::clone(&routes);
+                    Box::pin({
+                        async move {
+                            Ok(RequestService::handle_request(
+                                config,
+                                routes,
+                                crate::Request {
+                                    inner: req,
+                                    path_extension: String::new(),
+                                },
+                            )
+                            .await)
+                        }
+                    })
+                })
+            };
 
-            if let Err(e) = http2::Builder::new(TokioExecutor::new())
-                .serve_connection(io, service)
-                .await
-            {
+            let service = service_fn(clsr);
+
+            let mut builder = http2::Builder::new(TokioExecutor::new());
+
+            if let Some(size) = config.global.header_size_max {
+                builder.max_header_list_size(size);
+            } else {
+                builder.max_header_list_size(crate::DEFAULT_HEADER_SIZE_MAX);
+            }
+
+            if let Some(n) = config.global.connection_concurrent_requests_max {
+                builder.max_concurrent_streams(Some(n));
+            } else {
+                builder.max_concurrent_streams(Some(
+                    crate::DEFAULT_CONNECTION_CONCURRENT_REQUESTS_MAX,
+                ));
+            }
+
+            if let Err(e) = builder.serve_connection(io, service).await {
                 error!("{:#}", anyhow::Error::from(e).context("connection failed"));
             }
         });

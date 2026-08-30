@@ -5,24 +5,25 @@ pub mod up;
 pub mod utils;
 
 pub use core::Warden;
-use std::{net::SocketAddr, pin::Pin, sync::PoisonError};
+use std::{pin::Pin, sync::PoisonError};
 
-use hyper::body::Incoming;
 use log::error;
 
 pub type PinnedFuture<T> = Pin<Box<dyn Future<Output = T> + 'static + Send>>;
 
-pub const MAX_STATIC_HTML_FILE_SIZE: u64 = 1024 * 1024;
+pub const DEFAULT_HEADER_SIZE_MAX: u32 = 8 * 1024;
+
+/// At least 100 as recommended in the [HTTP/2 RFC](https://httpwg.org/specs/rfc9113.html#SETTINGS_MAX_CONCURRENT_STREAMS)
+pub const DEFAULT_CONNECTION_CONCURRENT_REQUESTS_MAX: u32 = 200;
 
 pub struct Request {
-    pub source: SocketAddr,
     pub inner: RawRequest,
     pub path_extension: String,
 }
 
 pub type RawRequest = hyper::Request<hyper::body::Incoming>;
 
-pub type IncomingResponse = hyper::Response<Incoming>;
+pub type IncomingResponse = hyper::Response<hyper::body::Incoming>;
 pub type FullResponse = hyper::Response<http_body_util::Full<hyper::body::Bytes>>;
 
 pub trait UnwrapLog<T> {
