@@ -7,141 +7,16 @@ use anyhow::Context;
 use http::{StatusCode, Uri, uri::PathAndQuery};
 use http_body_util::{BodyExt, Full};
 use hyper::{body::Bytes, service::Service};
-use log::{debug, error, info};
-use rustls::{
-    ServerConfig,
-    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
-};
+use log::error;
 use static_assertions::assert_impl_all;
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
-use tokio::{fs::File, io::AsyncReadExt, net::TcpListener, time::Instant};
-use tokio_rustls::TlsAcceptor;
+use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use tokio::{fs::File, io::AsyncReadExt, time::Instant};
 
 use crate::{
     PinnedFuture,
-    core::config::ConfigurationDesc,
-    down::ConnectionService,
-    services::{AuthService, RouterService, ThrottleService, route::Routes},
     up::Upstream,
-    utils::{self, http_error},
+    utils::{self},
 };
-
-pub struct Warden {
-    host: SocketAddr,
-
-    connection_service: ConnectionService,
-
-    config: Arc<ConfigurationDesc>,
-
-    routes: Arc<Routes>,
-}
-
-impl Warden {
-    pub async fn start(config_path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let config_path = config_path.as_ref();
-
-        let config = Arc::new(ConfigurationDesc::from_path_or_default(config_path).await);
-        let tls_acceptor = match &config.tls {
-            Some(tls) => {
-                // Setup TLS
-                let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
-                let certs = CertificateDer::pem_file_iter(&tls.certs)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .with_context(|| "failed to read cert file")?;
-
-                let key = PrivateKeyDer::from_pem_file(&tls.key)
-                    .with_context(|| "failed to read private key file")?;
-
-                let mut server_config = ServerConfig::builder()
-                    .with_no_client_auth()
-                    .with_single_cert(certs, key)
-                    .with_context(|| "failed to create TLS server config")?;
-
-                server_config.alpn_protocols =
-                    vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
-                Some(TlsAcceptor::from(Arc::new(server_config)))
-            }
-            None => None,
-        };
-        let host: SocketAddr = SocketAddr::from_str(&format!("{}:{}", config.host, config.port))
-            .with_context(|| "failed to parse host")?;
-        let listener: TcpListener = TcpListener::bind(host).await?;
-
-        info!("server started @ {}", host);
-
-        debug!("config: {config:#?}");
-
-        let (routes, errors) = RouterService::parse_routes(&config);
-        let routes = Arc::new(routes);
-
-        if !errors.is_empty() {
-            return Err(anyhow::anyhow!("failed to parse routes: {:#?}", errors));
-        }
-
-        let connection_service = ConnectionService::new(
-            listener,
-            tls_acceptor,
-            Arc::clone(&config),
-            Arc::clone(&routes),
-        );
-
-        Ok(Self {
-            host,
-            connection_service,
-
-            config,
-
-            routes,
-        })
-    }
-
-    pub fn host(&self) -> &SocketAddr {
-        &self.host
-    }
-
-    pub async fn serve_next(&mut self) -> anyhow::Result<()> {
-        self.connection_service.serve_next_connection().await
-    }
-
-    pub async fn close(&self) -> anyhow::Result<()> {
-        Ok(self.config.save_if_missing().await?)
-    }
-}
-
-pub struct RequestService;
-
-impl RequestService {
-    pub async fn handle_request(
-        config: impl AsRef<ConfigurationDesc>,
-        routes: impl AsRef<Routes>,
-        request: crate::Request,
-    ) -> crate::FullResponse {
-        let request = match AuthService::handle_request(&config, request).await {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
-
-        let request = match ThrottleService::handle_request(&config, request).await {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
-
-        match RouterService::route(&config, routes, request).await {
-            Ok(res) => res,
-            Err(e) => {
-                error!("{:#}", e.context("failed to handle request"));
-                http_error(StatusCode::INTERNAL_SERVER_ERROR)
-            }
-        }
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct Source {
