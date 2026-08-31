@@ -90,16 +90,16 @@ mod test {
 
         routes.inner.insert(
             Route::new("const/path").unwrap(),
-            Source::new(SourceInner::StaticHtml(vec![90])),
+            Source::new(SourceInner::StaticHtml(String::from("a"))),
         );
 
         let path = Path::new("const/path").unwrap();
 
         let (source, excess) = routes.find_match(&path).unwrap();
         match source.inner() {
-            SourceInner::StaticHtml(bytes) => {
-                assert_eq!(1, bytes.len());
-                assert_eq!(90, bytes[0]);
+            SourceInner::StaticHtml(text) => {
+                assert_eq!(1, text.len());
+                assert_eq!('a', text.chars().next().unwrap());
             }
             _ => {
                 panic!("SourceInner is not StaticHtml")
@@ -116,7 +116,7 @@ mod test {
         };
         routes.inner.insert(
             Route::new("const/*").unwrap(),
-            Source::new(SourceInner::StaticHtml(vec![91])),
+            Source::new(SourceInner::StaticHtml(String::from("b"))),
         );
         let path0 = Path::new("const/path").unwrap();
         let path1 = Path::new("const/path1/path2/").unwrap();
@@ -124,9 +124,9 @@ mod test {
 
         let (source, excess) = routes.find_match(&path0).unwrap();
         match source.inner() {
-            SourceInner::StaticHtml(bytes) => {
-                assert_eq!(1, bytes.len());
-                assert_eq!(91, bytes[0]);
+            SourceInner::StaticHtml(text) => {
+                assert_eq!(1, text.len());
+                assert_eq!('b', text.chars().next().unwrap());
             }
             _ => {
                 panic!("SourceInner is not StaticHtml")
@@ -138,9 +138,9 @@ mod test {
 
         let (source, excess) = routes.find_match(&path1).unwrap();
         match source.inner() {
-            SourceInner::StaticHtml(bytes) => {
-                assert_eq!(1, bytes.len());
-                assert_eq!(91, bytes[0]);
+            SourceInner::StaticHtml(text) => {
+                assert_eq!(1, text.len());
+                assert_eq!('b', text.chars().next().unwrap());
             }
             _ => {
                 panic!("SourceInner is not StaticHtml")
@@ -161,19 +161,19 @@ mod test {
         };
         routes.inner.insert(
             Route::new("/").unwrap(),
-            Source::new(SourceInner::StaticHtml(vec![91])),
+            Source::new(SourceInner::StaticHtml(String::from("b"))),
         );
         routes.inner.insert(
             Route::new("/dyn").unwrap(),
-            Source::new(SourceInner::StaticHtml(vec![92])),
+            Source::new(SourceInner::StaticHtml(String::from("c"))),
         );
         routes.inner.insert(
             Route::new("/test/*").unwrap(),
-            Source::new(SourceInner::StaticHtml(vec![93])),
+            Source::new(SourceInner::StaticHtml(String::from("d"))),
         );
         routes.inner.insert(
             Route::new("/nginx/*").unwrap(),
-            Source::new(SourceInner::StaticHtml(vec![94])),
+            Source::new(SourceInner::StaticHtml(String::from("e"))),
         );
         routes.inner.insert(
             Route::new("/secure/*").unwrap(),

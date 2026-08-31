@@ -7,7 +7,7 @@ use anyhow::Context;
 use http::{StatusCode, Uri, uri::PathAndQuery};
 use http_body_util::{BodyExt, Full};
 use hyper::{body::Bytes, service::Service};
-use log::{error, info};
+use log::{debug, error, info};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
@@ -75,6 +75,8 @@ impl Warden {
         let listener: TcpListener = TcpListener::bind(host).await?;
 
         info!("server started @ {}", host);
+
+        debug!("config: {config:#?}");
 
         let (routes, errors) = RouterService::parse_routes(&config);
         let routes = Arc::new(routes);
@@ -243,7 +245,7 @@ impl Service<crate::Request> for Source {
 
 #[derive(Debug, Default)]
 pub enum SourceInner {
-    StaticHtml(Vec<u8>),
+    StaticHtml(String),
 
     /// This type reads the HTML file each time the page is requested.
     /// Should not be used for high traffic routes since it's more computationally

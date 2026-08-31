@@ -55,8 +55,8 @@ impl ConnectionService {
         let config = Arc::clone(&self.config);
         let routes = Arc::clone(&self.routes);
 
-        let stream: Box<dyn AsyncIo> = match &config.global.host_throttle {
-            Some(thr) => Box::new(AsyncRateLimiter::new(stream, thr.bandwidth_limit_kbps)),
+        let stream: Box<dyn AsyncIo> = match &config.global.throttle {
+            Some(thr) => Box::new(AsyncRateLimiter::new(stream, thr.bandwidth_limit)),
             None => Box::new(stream),
         };
 

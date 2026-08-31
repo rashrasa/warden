@@ -35,7 +35,7 @@ pub struct ConfigurationDesc {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GlobalConfig {
-    pub host_throttle: Option<GlobalHostThrottleConfig>,
+    pub throttle: Option<GlobalHostThrottleConfig>,
     pub header_size_max: Option<u32>,
     pub connection_concurrent_requests_max: Option<u32>,
 }
@@ -43,7 +43,7 @@ pub struct GlobalConfig {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GlobalHostThrottleConfig {
-    pub bandwidth_limit_kbps: u64,
+    pub bandwidth_limit: i64,
 }
 
 impl Default for ConfigurationDesc {
@@ -56,7 +56,7 @@ impl Default for ConfigurationDesc {
             handlers: HashMap::new(),
             providers: HashMap::new(),
             global: GlobalConfig {
-                host_throttle: None,
+                throttle: None,
                 connection_concurrent_requests_max: None,
                 header_size_max: None,
             },
@@ -182,11 +182,11 @@ impl ConfigurationDesc {
                 ProtocolDesc::Html => match cache {
                     CacheDesc::None => Source::new(SourceInner::DynamicHtml(path.into())),
                     CacheDesc::Static => {
-                        let mut buf = vec![];
+                        let mut text = String::new();
                         let mut file = File::open(&path).await?;
 
-                        file.read_to_end(&mut buf).await?;
-                        Source::new(SourceInner::StaticHtml(buf))
+                        file.read_to_string(&mut text).await?;
+                        Source::new(SourceInner::StaticHtml(text))
                     }
                 },
                 ProtocolDesc::Http => {
