@@ -6,14 +6,17 @@ use http::StatusCode;
 use log::error;
 pub use route::RouterService;
 
-use crate::{core::config::ConfigurationDesc, services::route::Routes, utils::http_error};
+use crate::{
+    core::{Source, config::ConfigurationDesc, route::Routes},
+    utils::http_error,
+};
 
 pub struct RequestService;
 
 impl RequestService {
     pub async fn handle_request(
         config: impl AsRef<ConfigurationDesc>,
-        routes: impl AsRef<Routes>,
+        routes: impl AsRef<Routes<Source>>,
         request: crate::Request,
     ) -> crate::FullResponse {
         let request = match AuthService::handle_request(&config, request).await {

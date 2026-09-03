@@ -121,7 +121,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn it_works() {
+    async fn poll_read_throttles() {
         const BANDWIDTH: i64 = 1000;
         const TEST_DUR: usize = 5000;
         const TIME_ADVANCE: u64 = 100;

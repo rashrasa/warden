@@ -22,9 +22,9 @@ use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
-    core::config::ConfigurationDesc,
+    core::{Source, config::ConfigurationDesc, route::Routes},
     down::ConnectionService,
-    services::{RouterService, route::Routes},
+    services::RouterService,
 };
 
 pub type PinnedFuture<T> = Pin<Box<dyn Future<Output = T> + 'static + Send>>;
@@ -51,7 +51,7 @@ pub struct Warden {
 
     config: Arc<ConfigurationDesc>,
 
-    routes: Arc<Routes>,
+    routes: Arc<Routes<Source>>,
 }
 
 impl Warden {

@@ -12,8 +12,8 @@ use tokio_rustls::TlsAcceptor;
 
 use crate::{
     PinnedFuture,
-    core::{config::ConfigurationDesc, tcp::AsyncRateLimiter},
-    services::{RequestService, route::Routes},
+    core::{Source, config::ConfigurationDesc, route::Routes, tcp::AsyncRateLimiter},
+    services::RequestService,
 };
 
 trait AsyncIo: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -25,7 +25,7 @@ pub struct ConnectionService {
     tcp: TcpListener,
     tls: Option<TlsAcceptor>,
     config: Arc<ConfigurationDesc>,
-    routes: Arc<Routes>,
+    routes: Arc<Routes<Source>>,
 }
 
 impl ConnectionService {
@@ -33,7 +33,7 @@ impl ConnectionService {
         tcp: TcpListener,
         tls: Option<TlsAcceptor>,
         config: Arc<ConfigurationDesc>,
-        routes: Arc<Routes>,
+        routes: Arc<Routes<Source>>,
     ) -> Self {
         Self {
             tcp,
