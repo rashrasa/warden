@@ -39,7 +39,11 @@ impl Route {
         // TODO: Only allow valid URI characters.
         for part in path.split("/") {
             let part = part.trim();
-            parts.push(RoutePart::Part(part.into()));
+            if part == "*" {
+                parts.push(RoutePart::Wildcard);
+            } else {
+                parts.push(RoutePart::Part(part.into()));
+            }
         }
         Ok(Self {
             parts: parts.into(),
@@ -156,21 +160,26 @@ impl<T> Routes<T> {
 }
 
 impl<T> Router<T> for Routes<T> {
-    fn match_path<'a>(&'a self, path: &Path) -> Option<&'a T> {
+    fn match_path<'a>(&'a self, path: &'a Path) -> Option<(&'a T, &'a [String])> {
         let mut current = &self.root;
-        for s in &path.parts {
+
+        for i in 0..path.parts.len() {
+            let s = &path.parts[i];
             let part = s.as_str().into();
             match current.routes.get(&part) {
                 Some(v) => {
                     current = v;
                 }
                 None => {
-                    current = current.routes.get(&RoutePart::Wildcard)?;
+                    return Some((
+                        current.routes.get(&RoutePart::Wildcard)?.handler.as_ref()?,
+                        &path.parts[i..],
+                    ));
                 }
             }
         }
 
-        current.handler.as_ref()
+        Some((current.handler.as_ref()?, &[]))
     }
 }
 
@@ -186,7 +195,7 @@ pub trait Router<T> {
     /// Attempts to match the path against registered routes.
     ///
     /// Any given path can match, at most, one route.
-    fn match_path<'a>(&'a self, path: &Path) -> Option<&'a T>;
+    fn match_path<'a>(&'a self, path: &'a Path) -> Option<(&'a T, &'a [String])>;
 }
 
 // TODO: Evaluate whether a secure hasher is necessary. Routes are set by a
@@ -209,13 +218,6 @@ impl<T> Default for Node<T> {
 mod test {
     use super::*;
 
-    use http::Uri;
-
-    use crate::{
-        core::{Source, SourceInner},
-        up::Upstream,
-    };
-
     #[test]
     fn matches_root() {
         let r1 = Route::new("/").unwrap();
@@ -229,6 +231,18 @@ mod test {
 
         assert!(matches!(r2.matches(&p1), RouteMatch::Match { .. }));
         assert!(matches!(r2.matches(&p2), RouteMatch::Match { .. }));
+    }
+
+    #[test]
+    fn basic_matches() {
+        let mut routes = Routes::default();
+
+        routes.insert(Route::new("const/path").unwrap(), 'a');
+
+        let path = Path::new("const/path").unwrap();
+
+        let (v, ..) = routes.match_path(&path).unwrap();
+        assert_eq!(*v, 'a');
     }
 
     #[test]
@@ -251,61 +265,18 @@ mod test {
     }
 
     #[test]
-    fn basic_matches() {
-        let mut routes = Routes::default();
-
-        routes.insert(
-            Route::new("const/path").unwrap(),
-            Source::new(SourceInner::StaticHtml(String::from("a"))),
-        );
-
-        let path = Path::new("const/path").unwrap();
-
-        let source = routes.match_path(&path).unwrap();
-        match source.inner() {
-            SourceInner::StaticHtml(text) => {
-                assert_eq!(1, text.len());
-                assert_eq!('a', text.chars().next().unwrap());
-            }
-            _ => {
-                panic!("SourceInner is not StaticHtml")
-            }
-        }
-    }
-
-    #[test]
     fn wildcard_matches() {
         let mut routes = Routes::default();
-        routes.insert(
-            Route::new("const/*").unwrap(),
-            Source::new(SourceInner::StaticHtml(String::from("b"))),
-        );
+        routes.insert(Route::new("const/*").unwrap(), 'b');
         let path0 = Path::new("const/path").unwrap();
         let path1 = Path::new("const/path1/path2/").unwrap();
         let path3 = Path::new("").unwrap();
 
-        let source = routes.match_path(&path0).unwrap();
+        let (v0, ..) = routes.match_path(&path0).unwrap();
+        assert_eq!(*v0, 'b');
 
-        match source.inner() {
-            SourceInner::StaticHtml(text) => {
-                assert_eq!(1, text.len());
-                assert_eq!('b', text.chars().next().unwrap());
-            }
-            _ => {
-                panic!("SourceInner is not StaticHtml")
-            }
-        }
-
-        let source = routes.match_path(&path1).unwrap();
-        match source.inner() {
-            SourceInner::StaticHtml(text) => {
-                assert_eq!(1, text.len());
-                assert_eq!('b', text.chars().next().unwrap());
-            }
-            _ => {
-                panic!("SourceInner is not StaticHtml")
-            }
-        }
+        let (v1, ..) = routes.match_path(&path1).unwrap();
+        assert_eq!(*v1, 'b');
 
         assert!(routes.match_path(&path3).is_none());
     }
@@ -313,32 +284,14 @@ mod test {
     #[tokio::test]
     async fn mixed_matches() {
         let mut routes = Routes::default();
-        routes.insert(
-            Route::new("/").unwrap(),
-            Source::new(SourceInner::StaticHtml(String::from("b"))),
-        );
-        routes.insert(
-            Route::new("/dyn").unwrap(),
-            Source::new(SourceInner::StaticHtml(String::from("c"))),
-        );
-        routes.insert(
-            Route::new("/test/*").unwrap(),
-            Source::new(SourceInner::StaticHtml(String::from("d"))),
-        );
-        routes.insert(
-            Route::new("/nginx/*").unwrap(),
-            Source::new(SourceInner::StaticHtml(String::from("e"))),
-        );
-        routes.insert(
-            Route::new("/secure/*").unwrap(),
-            Source::new(SourceInner::Https(
-                Uri::from_static("https://localhost"),
-                Upstream::test().await.unwrap(),
-            )),
-        );
-        let path = Path::new("/secure").unwrap();
-        let source = routes.match_path(&path).unwrap();
+        routes.insert(Route::new("/").unwrap(), 'b');
+        routes.insert(Route::new("/dyn").unwrap(), 'b');
+        routes.insert(Route::new("/test/*").unwrap(), 'd');
+        routes.insert(Route::new("/nginx/*").unwrap(), 'e');
+        routes.insert(Route::new("/secure/*").unwrap(), 'f');
+        let path = Path::new("/secure/1").unwrap();
+        let (v, ..) = routes.match_path(&path).unwrap();
 
-        assert!(matches!(source.inner(), SourceInner::Https(..)));
+        assert_eq!(*v, 'f');
     }
 }

@@ -44,7 +44,7 @@ impl RouterService {
         let path: &str = utils::path(&request);
 
         let path = Path::new(path).with_context(|| "failed to parse path")?;
-        if let Some(source) = routes.match_path(&path) {
+        if let Some((source, excess)) = routes.match_path(&path) {
             source.call(request).await
         } else {
             Ok(utils::http_error(StatusCode::NOT_FOUND))
