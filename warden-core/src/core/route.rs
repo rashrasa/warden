@@ -5,16 +5,25 @@
 
 use std::collections::HashMap;
 
-/// Route specifier which allows wildcards and valid URI characters
+/// Describes a route.
+///
+/// Parts are separated by a backslash (/) and parts can either be
+/// a valid URI part or a wildcard.
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Route {
-    parts: Vec<RoutePart>,
+    parts: Box<[RoutePart]>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
-enum RoutePart {
+pub(crate) enum RoutePart {
     Wildcard,
-    Part(String),
+    Part(Box<str>),
+}
+
+impl From<&str> for RoutePart {
+    fn from(value: &str) -> Self {
+        Self::Part(value.into())
+    }
 }
 
 impl Route {
@@ -30,9 +39,11 @@ impl Route {
         // TODO: Only allow valid URI characters.
         for part in path.split("/") {
             let part = part.trim();
-            parts.push(RoutePart::Part(part.to_owned()));
+            parts.push(RoutePart::Part(part.into()));
         }
-        Ok(Self { parts })
+        Ok(Self {
+            parts: parts.into(),
+        })
     }
 
     pub fn matches<'a>(&self, path: &'a Path) -> RouteMatch<'a> {
@@ -52,7 +63,7 @@ impl Route {
                             };
                         }
                         RoutePart::Part(r_p) => {
-                            if p != r_p {
+                            if *p != **r_p {
                                 return RouteMatch::NotMatch;
                             }
                         }
@@ -88,6 +99,9 @@ pub enum RouteMatch<'a> {
 /// Specific path type which does not allow wildcards.
 #[derive(Debug)]
 pub struct Path {
+    /// Only contains valid URI path components
+    /// without any delimiters (e.g. `/`, `?`, `#`, etc.) or
+    /// unescaped reserved URI characters.
     parts: Vec<String>,
 }
 
@@ -105,8 +119,12 @@ impl Path {
 }
 
 // Invariant: No given [`Path`] value matches more than one route.
-/// Generic [`Route`] container for storing values against URI routes. Mainly
+/// Efficiently maps [`Route`]s to a generic value. Mainly
 /// used to store HTTP route handlers.
+///
+/// [`FALLBACK`] specifies whether to fallback to a previous wildcard branch
+/// if a non-wildcard branch only partially matched when looking up values
+/// by path.
 pub struct Routes<T> {
     root: Node<T>,
 }
@@ -118,31 +136,57 @@ impl<T> Routes<T> {
 
     /// Inserts value at the provided route. Returns the old value if it existed.
     pub fn insert(&mut self, route: Route, value: T) -> Option<T> {
-        todo!()
+        let mut current = &mut self.root;
+        for part in route.parts {
+            current = current.routes.entry(part).or_default();
+        }
+
+        current.handler.replace(value)
     }
 
     /// Gets the value at the provided route if it exists.
     pub fn get<'a>(&'a self, route: &Route) -> Option<&'a T> {
-        todo!()
-    }
+        let mut current = &self.root;
+        for part in &route.parts {
+            current = current.routes.get(part)?;
+        }
 
-    /// Attempts to match the path against registered routes.
-    ///
-    /// Any given path can match, at most, one route.
-    pub fn match_path<'a>(&'a self, path: &Path) -> Option<&'a T> {
-        todo!()
+        current.handler.as_ref()
+    }
+}
+
+impl<T> Router<T> for Routes<T> {
+    fn match_path<'a>(&'a self, path: &Path) -> Option<&'a T> {
+        let mut current = &self.root;
+        for s in &path.parts {
+            let part = s.as_str().into();
+            match current.routes.get(&part) {
+                Some(v) => {
+                    current = v;
+                }
+                None => {
+                    current = current.routes.get(&RoutePart::Wildcard)?;
+                }
+            }
+        }
+
+        current.handler.as_ref()
     }
 }
 
 impl<T> Default for Routes<T> {
     fn default() -> Self {
         Self {
-            root: Node {
-                handler: None,
-                routes: HashMap::new(),
-            },
+            root: Default::default(),
         }
     }
+}
+
+pub trait Router<T> {
+    /// Attempts to match the path against registered routes.
+    ///
+    /// Any given path can match, at most, one route.
+    fn match_path<'a>(&'a self, path: &Path) -> Option<&'a T>;
 }
 
 // TODO: Evaluate whether a secure hasher is necessary. Routes are set by a
@@ -150,6 +194,15 @@ impl<T> Default for Routes<T> {
 pub struct Node<T> {
     handler: Option<T>,
     routes: HashMap<RoutePart, Node<T>>,
+}
+
+impl<T> Default for Node<T> {
+    fn default() -> Self {
+        Self {
+            handler: None,
+            routes: HashMap::new(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -232,6 +285,7 @@ mod test {
         let path3 = Path::new("").unwrap();
 
         let source = routes.match_path(&path0).unwrap();
+
         match source.inner() {
             SourceInner::StaticHtml(text) => {
                 assert_eq!(1, text.len());

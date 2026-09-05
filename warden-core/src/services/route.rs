@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::{Context, Error};
 use http::StatusCode;
 use hyper::service::Service;
@@ -9,7 +7,7 @@ use crate::{
     core::{
         Source,
         config::ConfigurationDesc,
-        route::{Path, Route, RouteMatch, Routes},
+        route::{Path, Route, Router, Routes},
     },
     utils,
 };
