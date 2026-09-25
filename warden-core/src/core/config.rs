@@ -13,8 +13,8 @@ use tokio::{
 };
 
 use crate::{
+    client::Upstream,
     core::{Source, SourceInner},
-    up::Upstream,
 };
 
 #[derive(Debug, Serialize, Deserialize)]

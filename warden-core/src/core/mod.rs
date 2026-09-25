@@ -14,7 +14,7 @@ use tokio::{fs::File, io::AsyncReadExt, time::Instant};
 
 use crate::{
     PinnedFuture,
-    up::Upstream,
+    client::Upstream,
     utils::{self},
 };
 

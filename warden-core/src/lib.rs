@@ -1,7 +1,7 @@
+pub mod client;
 pub mod core;
-pub mod down;
+pub mod server;
 pub mod services;
-pub mod up;
 pub mod utils;
 
 use std::{
@@ -23,7 +23,7 @@ use tokio_rustls::TlsAcceptor;
 
 use crate::{
     core::{Source, config::ConfigurationDesc, route::Routes},
-    down::ConnectionService,
+    server::ConnectionService,
     services::RouterService,
 };
 

@@ -108,7 +108,7 @@ impl Service<crate::Request> for Http2Upstream {
                 .send_request(req.inner)
                 .await?;
 
-            crate::up::collect_body(incoming).await
+            crate::client::collect_body(incoming).await
         })
     }
 }
