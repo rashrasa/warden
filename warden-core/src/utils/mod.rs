@@ -1,6 +1,9 @@
+use std::sync::PoisonError;
+
 use http::{HeaderMap, StatusCode};
 use http_body_util::Full;
 use hyper::body::Bytes;
+use log::error;
 
 pub fn binary_response(status: StatusCode, body: &[u8], mime_type: &str) -> crate::FullResponse {
     hyper::Response::builder()
@@ -65,4 +68,20 @@ pub fn path(request: &crate::Request) -> &str {
     }
 
     path
+}
+
+pub trait UnwrapLog<T> {
+    fn unwrap_log(self) -> T;
+}
+
+impl<T> UnwrapLog<T> for Result<T, PoisonError<T>> {
+    fn unwrap_log(self) -> T {
+        match self {
+            Ok(v) => v,
+            Err(err) => {
+                error!("{err:?}",);
+                err.into_inner()
+            }
+        }
+    }
 }

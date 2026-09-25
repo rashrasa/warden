@@ -4,16 +4,10 @@ pub mod server;
 pub mod services;
 pub mod utils;
 
-use std::{
-    net::SocketAddr,
-    path::Path,
-    pin::Pin,
-    str::FromStr,
-    sync::{Arc, PoisonError},
-};
+use std::{net::SocketAddr, path::Path, pin::Pin, str::FromStr, sync::Arc};
 
 use anyhow::Context;
-use log::{debug, error, info};
+use log::{debug, info};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
@@ -124,21 +118,5 @@ impl Warden {
 
     pub async fn close(&self) -> anyhow::Result<()> {
         Ok(self.config.save_if_missing().await?)
-    }
-}
-
-pub trait UnwrapLog<T> {
-    fn unwrap_log(self) -> T;
-}
-
-impl<T> UnwrapLog<T> for Result<T, PoisonError<T>> {
-    fn unwrap_log(self) -> T {
-        match self {
-            Ok(v) => v,
-            Err(err) => {
-                error!("{err:?}",);
-                err.into_inner()
-            }
-        }
     }
 }
