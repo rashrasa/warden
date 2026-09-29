@@ -1,25 +1,104 @@
+use std::sync::Arc;
+
+use hyper::{client::conn::http1, service::Service};
+use hyper_util::rt::TokioIo;
+use log::error;
+use tokio::{net::TcpStream, sync::Mutex};
 use anyhow::Context;
 use http::Uri;
-use hyper::{client::conn::http2::*, service::Service};
-use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use log::error;
+use hyper::{client::conn::http2};
+use hyper_util::rt::{TokioExecutor,  TokioTimer};
 use rustls::{ClientConfig, KeyLogFile, RootCertStore};
-use std::{sync::Arc, time::Duration};
-use tokio::{net::TcpStream, sync::Mutex};
+use std::{ time::Duration};
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
-use crate::PinnedFuture;
+use crate::{ PinnedFuture, client::{collect_body, connection::{self, Connection}}};
+
+async fn make_http1_connection(
+    io: TokioIo<TcpStream>,
+) -> Result<
+    (
+        http1::SendRequest<hyper::body::Incoming>,
+        http1::Connection<TokioIo<TcpStream>, hyper::body::Incoming>,
+    ),
+    hyper::Error,
+> {
+    http1::Builder::new().handshake(io).await
+}
+
+#[derive(Debug, Clone)]
+pub struct Http1Upstream {
+    inner: Arc<Http1UpstreamInner>,
+}
+
+impl Http1Upstream {
+    pub async fn new(uri: &hyper::Uri) -> anyhow::Result<Self> {
+        let uri = uri.clone();
+        let host = uri.host().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                anyhow::anyhow!("invalid uri: {uri}"),
+            )
+        })?;
+        let dst = format!("{host}:80");
+
+        Ok(Self {
+            inner: Arc::new(Http1UpstreamInner { sender: Connection::new_http1(), uri, dst }),
+        })
+    }
+
+    fn get(&mut self) {
+        todo!()
+    }
+
+    fn reconnect(&mut self) {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+struct Http1UpstreamInner {
+    sender: connection::Connection,
+    uri: hyper::Uri,
+    dst: String,
+}
+
+#[derive(Debug)]
+struct Sender {
+    inner: Mutex<http1::SendRequest<hyper::body::Incoming>>,
+}
+
+impl Service<crate::Request> for Http1Upstream {
+    type Response = crate::FullResponse;
+    type Error = anyhow::Error;
+    type Future = PinnedFuture<Result<Self::Response, Self::Error>>;
+
+    fn call(&self, req: crate::Request) -> Self::Future {
+        let cloned = self.clone();
+        Box::pin(async move {
+            let incoming =  cloned
+                .inner
+                .sender
+                .send(req)
+                .await?;
+
+            collect_body(incoming).await
+        })
+    }
+}
+
+
 
 async fn make_http2_connection(
     io: TokioIo<TlsStream<TcpStream>>,
 ) -> Result<
     (
-        SendRequest<hyper::body::Incoming>,
-        Connection<TokioIo<TlsStream<TcpStream>>, hyper::body::Incoming, TokioExecutor>,
+        http2::SendRequest<hyper::body::Incoming>,
+        http2::Connection<TokioIo<TlsStream<TcpStream>>, hyper::body::Incoming, TokioExecutor>,
     ),
     hyper::Error,
 > {
-    Builder::new(TokioExecutor::new())
+   http2:: Builder::new(TokioExecutor::new())
         .keep_alive_while_idle(true)
         .keep_alive_interval(Duration::from_millis(5000))
         .timer(TokioTimer::new())
@@ -34,7 +113,7 @@ pub struct Http2Upstream {
 }
 
 pub struct Http2UpstreamInner {
-    sender: SendRequest<hyper::body::Incoming>,
+    sender: http2::SendRequest<hyper::body::Incoming>,
 }
 
 impl Http2Upstream {

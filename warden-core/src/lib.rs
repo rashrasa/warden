@@ -28,6 +28,7 @@ pub const DEFAULT_HEADER_SIZE_MAX: u32 = 8 * 1024;
 /// At least 100 as recommended in the [HTTP/2 RFC](https://httpwg.org/specs/rfc9113.html#SETTINGS_MAX_CONCURRENT_STREAMS)
 pub const DEFAULT_CONNECTION_CONCURRENT_REQUESTS_MAX: u32 = 200;
 
+#[derive(Debug)]
 pub struct Request {
     pub inner: RawRequest,
     pub path_extension: String,

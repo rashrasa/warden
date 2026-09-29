@@ -7,8 +7,8 @@ use static_assertions::assert_impl_all;
 
 use crate::PinnedFuture;
 
-mod http1;
-mod http2;
+mod protocols;
+mod connection;
 
 trait UpstreamService:
     Service<
@@ -19,8 +19,8 @@ trait UpstreamService:
     >
 {
 }
-impl UpstreamService for http1::Http1Upstream {}
-impl UpstreamService for http2::Http2Upstream {}
+impl UpstreamService for protocols::Http1Upstream {}
+impl UpstreamService for protocols::Http2Upstream {}
 
 pub struct Upstream {
     inner: Arc<dyn UpstreamService + Send + Sync + 'static>,
@@ -35,13 +35,13 @@ impl std::fmt::Debug for Upstream {
 impl Upstream {
     pub async fn http1(uri: &Uri) -> anyhow::Result<Self> {
         Ok(Self {
-            inner: Arc::new(http1::Http1Upstream::connect(uri).await?),
+            inner: Arc::new(protocols::Http1Upstream::new(uri).await?),
         })
     }
 
     pub async fn http2(uri: &Uri) -> anyhow::Result<Self> {
         Ok(Self {
-            inner: Arc::new(http2::Http2Upstream::connect(uri).await?),
+            inner: Arc::new(protocols::Http2Upstream::connect(uri).await?),
         })
     }
 
