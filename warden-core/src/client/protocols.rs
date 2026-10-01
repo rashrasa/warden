@@ -1,18 +1,24 @@
 use std::sync::Arc;
 
-use hyper::{client::conn::http1, service::Service};
-use hyper_util::rt::TokioIo;
-use log::error;
-use tokio::{net::TcpStream, sync::Mutex};
 use anyhow::Context;
 use http::Uri;
-use hyper::{client::conn::http2};
-use hyper_util::rt::{TokioExecutor,  TokioTimer};
+use hyper::client::conn::http2;
+use hyper::{client::conn::http1, service::Service};
+use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioTimer};
+use log::error;
 use rustls::{ClientConfig, KeyLogFile, RootCertStore};
-use std::{ time::Duration};
+use std::time::Duration;
+use tokio::{net::TcpStream, sync::Mutex};
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
-use crate::{ PinnedFuture, client::{collect_body, connection::{self, Connection}}};
+use crate::{
+    PinnedFuture,
+    client::{
+        collect_body,
+        connection::{self, Connection},
+    },
+};
 
 async fn make_http1_connection(
     io: TokioIo<TcpStream>,
@@ -43,7 +49,11 @@ impl Http1Upstream {
         let dst = format!("{host}:80");
 
         Ok(Self {
-            inner: Arc::new(Http1UpstreamInner { sender: Connection::new_http1(), uri, dst }),
+            inner: Arc::new(Http1UpstreamInner {
+                sender: Connection::new_http1(),
+                uri,
+                dst,
+            }),
         })
     }
 
@@ -76,18 +86,12 @@ impl Service<crate::Request> for Http1Upstream {
     fn call(&self, req: crate::Request) -> Self::Future {
         let cloned = self.clone();
         Box::pin(async move {
-            let incoming =  cloned
-                .inner
-                .sender
-                .send(req)
-                .await?;
+            let incoming = cloned.inner.sender.send(req).await?;
 
             collect_body(incoming).await
         })
     }
 }
-
-
 
 async fn make_http2_connection(
     io: TokioIo<TlsStream<TcpStream>>,
@@ -98,7 +102,7 @@ async fn make_http2_connection(
     ),
     hyper::Error,
 > {
-   http2:: Builder::new(TokioExecutor::new())
+    http2::Builder::new(TokioExecutor::new())
         .keep_alive_while_idle(true)
         .keep_alive_interval(Duration::from_millis(5000))
         .timer(TokioTimer::new())

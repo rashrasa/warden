@@ -7,8 +7,8 @@ use static_assertions::assert_impl_all;
 
 use crate::PinnedFuture;
 
-mod protocols;
 mod connection;
+mod protocols;
 
 trait UpstreamService:
     Service<
