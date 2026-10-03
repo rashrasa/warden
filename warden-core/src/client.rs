@@ -1,14 +1,51 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use http::{Response, Uri};
 use http_body_util::{BodyExt, Full};
 use hyper::service::Service;
 use static_assertions::assert_impl_all;
 
-use crate::PinnedFuture;
+use crate::{PinnedFuture, client::connection::Connection};
 
 mod connection;
 mod protocols;
+
+/// HTTP Client managing connections without caching.
+///
+/// A new client should be created for each individual upstream service
+/// as connection state and pending request futures will be driven in one
+/// task.
+pub struct Client {
+    host: Host,
+    conns: Vec<Connection>,
+}
+
+impl Client {
+    pub fn new(host: Host) -> Self {
+        Self {
+            host,
+            conns: vec![],
+        }
+    }
+
+    pub fn send<Fut>(&self, req: crate::Request) -> Fut
+    where
+        Fut: Future<Output = crate::IncomingResponse>,
+    {
+        todo!()
+    }
+}
+
+pub struct Host {
+    addr: String,
+}
+
+impl FromStr for Host {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        todo!()
+    }
+}
 
 trait UpstreamService:
     Service<
